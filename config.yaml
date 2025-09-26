@@ -1,0 +1,249 @@
+event_loop_interval: 10ms
+queue_size: 1000
+devices:
+  device-1:
+    type: controller
+    protocol: mock
+    endpoint: mock://device-1
+    parameters: {}
+    timeout: 10s
+    retry_count: 0
+axes:
+  axis-x:
+    device_id: device-1
+    max_velocity: 100
+    max_acceleration: 50
+    min_position: -1000
+    max_position: 1000
+    home_position: 0
+    units: mm
+    invert_direction: false
+  axis-y:
+    device_id: device-1
+    max_velocity: 100
+    max_acceleration: 50
+    min_position: -1000
+    max_position: 1000
+    home_position: 0
+    units: mm
+    invert_direction: false
+  axis-z:
+    device_id: device-1
+    max_velocity: 50
+    max_acceleration: 25
+    min_position: -500
+    max_position: 500
+    home_position: 0
+    units: mm
+    invert_direction: false
+safety:
+  enable_limits: true
+  enable_emergency: true
+  max_temperature: 80
+  min_voltage: 12
+  watchdog_timeout: 10s
+ipc:
+  type: tcp
+  address: 127.0.0.1
+  port: 18080
+  timeout: 5s
+  buffer_size: 1024
+task_templates:
+  home_all:
+    name: "Home All Axes"
+    description: "Home all axes to their home positions"
+    type: "sequence"
+    parameters:
+      mode: "sequential"
+      stop_on_error: true
+    nodes:
+      - id: "home-x"
+        type: "home"
+        parameters:
+          axes: ["axis-x"]
+      - id: "home-y"
+        type: "home"
+        parameters:
+          axes: ["axis-y"]
+      - id: "home-z"
+        type: "home"
+        parameters:
+          axes: ["axis-z"]
+    timeout: 30s
+    priority: 3  # High
+
+  safety_check:
+    name: "Safety Check Sequence"
+    description: "Check safety sensors before operation"
+    type: "sequence"
+    parameters:
+      mode: "sequential"
+      stop_on_error: true
+    nodes:
+      - id: "check-emergency"
+        type: "io"
+        parameters:
+          device_id: "device-1"
+          channel: "emergency-stop"
+          action: "read"
+      - id: "check-door"
+        type: "io"
+        parameters:
+          device_id: "device-1"
+          channel: "safety-door"
+          action: "read"
+      - id: "delay-check"
+        type: "delay"
+        parameters:
+          duration: 1s
+          unit: "s"
+    timeout: 5s
+    priority: 2  # Medium
+
+  motor_test:
+    name: "Motor Test Cycle"
+    description: "Test motor operation cycle"
+    type: "sequence"
+    parameters:
+      mode: "sequential"
+      stop_on_error: true
+    nodes:
+      - id: "start-motor"
+        type: "motor_control"
+        parameters:
+          device_id: "device-1"
+          motor_id: "motor-1"
+          action: "start"
+          speed: 100.0
+      - id: "wait-stable"
+        type: "delay"
+        parameters:
+          duration: 3s
+          unit: "s"
+      - id: "check-status"
+        type: "motor_status"
+        parameters:
+          device_id: "device-1"
+          motor_id: "motor-1"
+      - id: "stop-motor"
+        type: "motor_control"
+        parameters:
+          device_id: "device-1"
+          motor_id: "motor-1"
+          action: "stop"
+    timeout: 10s
+    priority: 1  # Low
+command_mappings:
+  self_check:
+    abstract_command: "self_check"
+    description: "执行系统自检"
+    template: "safety_check"
+    priority: 3  # High
+    timeout: 10s
+
+  reset:
+    abstract_command: "reset"
+    description: "复位系统到初始状态"
+    nodes:
+      - id: "stop-all"
+        type: "motor_control"
+        parameters:
+          device_id: "device-1"
+          motor_id: "all"
+          action: "stop"
+      - id: "reset-delay"
+        type: "delay"
+        parameters:
+          duration: 2s
+          unit: "s"
+    priority: 3  # High
+    timeout: 15s
+
+  start:
+    abstract_command: "start"
+    description: "启动系统"
+    template: "safety_check"
+    priority: 2  # Medium
+    timeout: 20s
+
+  stop:
+    abstract_command: "stop"
+    description: "停止系统"
+    nodes:
+      - id: "stop-motors"
+        type: "motor_control"
+        parameters:
+          device_id: "device-1"
+          motor_id: "all"
+          action: "stop"
+    priority: 3  # High
+    timeout: 10s
+
+  emergency_stop:
+    abstract_command: "emergency_stop"
+    description: "急停系统"
+    nodes:
+      - id: "emergency-stop-motors"
+        type: "motor_control"
+        parameters:
+          device_id: "device-1"
+          motor_id: "all"
+          action: "stop"
+    priority: 0  # Emergency
+    timeout: 5s
+
+  home:
+    abstract_command: "home"
+    description: "回零所有轴"
+    template: "home_all"
+    priority: 3  # High
+    timeout: 30s
+
+  initialize:
+    abstract_command: "initialize"
+    description: "初始化系统"
+    nodes:
+      - id: "init-self-check"
+        type: "sequence"
+        parameters:
+          mode: "sequential"
+          stop_on_error: true
+        children:
+          - id: "init-io-check"
+            type: "io"
+            parameters:
+              device_id: "device-1"
+              channel: "system-status"
+              action: "read"
+          - id: "init-delay"
+            type: "delay"
+            parameters:
+              duration: 1s
+              unit: "s"
+      - id: "init-home"
+        type: "sequence"
+        parameters:
+          mode: "sequential"
+          stop_on_error: true
+        children:
+          - id: "home-x"
+            type: "home"
+            parameters:
+              axes: ["axis-x"]
+          - id: "home-y"
+            type: "home"
+            parameters:
+              axes: ["axis-y"]
+          - id: "home-z"
+            type: "home"
+            parameters:
+              axes: ["axis-z"]
+    priority: 3  # High
+    timeout: 60s
+
+  safety_check:
+    abstract_command: "safety_check"
+    description: "安全检查"
+    template: "safety_check"
+    priority: 3  # High
+    timeout: 15s
