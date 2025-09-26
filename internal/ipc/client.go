@@ -15,18 +15,18 @@ import (
 )
 
 type IPCClient struct {
-	config      types.IPCConfig
-	conn        net.Conn
-	decoder     *json.Decoder
-	encoder     *json.Encoder
-	receiveChan chan types.IPCMessage
-	sendChan    chan []byte
-	handlers    map[string]func(types.IPCMessage)
+	config       types.IPCConfig
+	conn         net.Conn
+	decoder      *json.Decoder
+	encoder      *json.Encoder
+	receiveChan  chan types.IPCMessage
+	sendChan     chan []byte
+	handlers     map[string]func(types.IPCMessage)
 	handlersLock sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	connected   bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	connected    bool
 }
 
 func NewIPCClient(config types.IPCConfig) *IPCClient {
@@ -42,7 +42,7 @@ func NewIPCClient(config types.IPCConfig) *IPCClient {
 }
 
 func (c *IPCClient) Connect() error {
-	address := fmt.Sprintf("%s:%d", c.config.Address, c.config.Port)
+	address := net.JoinHostPort(c.config.Address, fmt.Sprintf("%d", c.config.Port))
 
 	var err error
 	c.conn, err = net.DialTimeout("tcp", address, c.config.Timeout)

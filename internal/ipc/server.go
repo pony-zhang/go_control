@@ -48,7 +48,7 @@ func NewIPCServer(config types.IPCConfig) *IPCServer {
 
 func (s *IPCServer) Start() error {
 	var err error
-	address := fmt.Sprintf("%s:%d", s.config.Address, s.config.Port)
+	address := net.JoinHostPort(s.config.Address, fmt.Sprintf("%d", s.config.Port))
 
 	s.server, err = net.Listen("tcp", address)
 	if err != nil {

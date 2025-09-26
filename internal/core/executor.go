@@ -148,6 +148,8 @@ func (ce *CommandExecutor) executeCommands() {
 	defer ce.wg.Done()
 
 	sendChan := ce.queue.GetSendChannel()
+	completeChan := ce.queue.GetCompleteChannel()
+	go ce.handleCompletions(completeChan)
 
 	for {
 		select {
@@ -157,9 +159,6 @@ func (ce *CommandExecutor) executeCommands() {
 			go ce.processCommand(queuedCmd)
 		}
 	}
-
-	completeChan := ce.queue.GetCompleteChannel()
-	go ce.handleCompletions(completeChan)
 }
 
 func (ce *CommandExecutor) processCommand(queuedCmd *QueuedCommand) {

@@ -354,6 +354,7 @@ func (stn *SequenceTaskNode) executeSpecific(ctx context.Context) error {
 func (stn *SequenceTaskNode) executeSequential(ctx context.Context) error {
 	for _, child := range stn.command.Nodes {
 		childCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
 
 		if childBase, ok := child.(*BaseTaskNode); ok {
 			childBase.SetCancelFunc(cancel)
@@ -377,6 +378,8 @@ func (stn *SequenceTaskNode) executeParallel(ctx context.Context) error {
 			defer wg.Done()
 
 			childCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+
 			if childBase, ok := node.(*BaseTaskNode); ok {
 				childBase.SetCancelFunc(cancel)
 			}
