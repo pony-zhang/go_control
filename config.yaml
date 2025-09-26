@@ -8,6 +8,95 @@ devices:
     parameters: {}
     timeout: 10s
     retry_count: 0
+
+  # Modbus TCP设备示例
+  modbus-tcp-device:
+    type: motor_controller
+    protocol: modbus_tcp
+    endpoint: 192.168.1.100:502
+    parameters:
+      type: tcp
+      address: 192.168.1.100
+      port: 502
+      slave_id: 1
+      timeout: 5s
+      retry_count: 3
+    timeout: 10s
+    retry_count: 3
+
+  # Modbus RTU设备示例
+  modbus-rtu-device:
+    type: motor_controller
+    protocol: modbus_rtu
+    endpoint: /dev/ttyUSB0
+    parameters:
+      type: rtu
+      address: /dev/ttyUSB0
+      baud_rate: 9600
+      data_bits: 8
+      stop_bits: 1
+      parity: N
+      slave_id: 2
+      timeout: 5s
+    timeout: 10s
+    retry_count: 3
+
+  # 串口设备示例
+  serial-device:
+    type: sensor
+    protocol: serial
+    endpoint: /dev/ttyUSB1
+    parameters:
+      port_name: /dev/ttyUSB1
+      baud_rate: 115200
+      data_bits: 8
+      stop_bits: 1
+      parity: N
+      flow_control: false
+      timeout: 5s
+    timeout: 10s
+    retry_count: 3
+
+  # 自定义协议设备示例
+  custom-protocol-device:
+    type: custom_controller
+    protocol: custom
+    endpoint: 192.168.1.200:8080
+    parameters:
+      protocol_type: binary
+      address: 192.168.1.200
+      port: 8080
+      timeout: 5s
+      frame_delimiter: "0D0A"
+      header: "AA55"
+      trailer: "0D0A"
+      checksum_method: crc16
+      big_endian: true
+      max_frame_size: 256
+      encoding: utf-8
+      commands:
+        - name: "read"
+          command_code: "01"
+          format: "binary"
+          fields:
+            - name: "address"
+              type: "uint16"
+              size: 2
+              offset: 0
+            - name: "length"
+              type: "uint8"
+              size: 1
+              offset: 2
+      responses:
+        - command_code: "01"
+          format: "binary"
+          fields:
+            - name: "data"
+              type: "bytes"
+              size: 0
+              offset: 0
+    timeout: 10s
+    retry_count: 3
 axes:
   axis-x:
     device_id: device-1
