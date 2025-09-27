@@ -4,8 +4,8 @@
 *.dll
 *.so
 *.dylib
-control
-simulator
+
+bin/
 
 # Test binary, built with `go test -c`
 *.test

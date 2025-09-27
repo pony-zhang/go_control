@@ -22,19 +22,19 @@ import (
 )
 
 type MotionControlSystem struct {
-	configManager      *config.ConfigManager
-	eventLoop          *core.EventLoop
-	taskTrigger        *core.TaskTrigger
-	taskScheduler      *core.TaskScheduler
-	taskDecomposer     *core.TaskNodeDecomposer
-	commandExecutor    *core.CommandExecutor
-	executionQueue     *core.ExecutionQueue
-	deviceManager      *device.DeviceManager
-	commandMappingMgr  *core.CommandMappingManager
-	ipcServer          *ipc.IPCServer
-	ctx                context.Context
-	cancel             context.CancelFunc
-	running            bool
+	configManager     *config.ConfigManager
+	eventLoop         *core.EventLoop
+	taskTrigger       *core.TaskTrigger
+	taskScheduler     *core.TaskScheduler
+	taskDecomposer    *core.TaskNodeDecomposer
+	commandExecutor   *core.CommandExecutor
+	executionQueue    *core.ExecutionQueue
+	deviceManager     *device.DeviceManager
+	commandMappingMgr *core.CommandMappingManager
+	ipcServer         *ipc.IPCServer
+	ctx               context.Context
+	cancel            context.CancelFunc
+	running           bool
 }
 
 func NewMotionControlSystem(configPath string) (*MotionControlSystem, error) {
@@ -253,12 +253,12 @@ func (mcs *MotionControlSystem) handleTaskRequest(message types.IPCMessage) {
 
 	if taskData, ok := message.Data["task"]; ok {
 		task := &types.Task{
-			ID:         fmt.Sprintf("task-%d", time.Now().UnixNano()),
-			Type:       types.CommandType(taskData.(map[string]interface{})["type"].(string)),
-			Priority:   types.PriorityMedium,
-			Status:     types.StatusPending,
-			CreatedAt:  time.Now(),
-			Timeout:    30 * time.Second,
+			ID:        fmt.Sprintf("task-%d", time.Now().UnixNano()),
+			Type:      types.CommandType(taskData.(map[string]interface{})["type"].(string)),
+			Priority:  types.PriorityMedium,
+			Status:    types.StatusPending,
+			CreatedAt: time.Now(),
+			Timeout:   30 * time.Second,
 		}
 
 		if err := mcs.taskScheduler.ScheduleTask(task); err != nil {
@@ -284,14 +284,14 @@ func (mcs *MotionControlSystem) handleTaskRequest(message types.IPCMessage) {
 func (mcs *MotionControlSystem) handleStatusRequest(message types.IPCMessage) {
 	status := map[string]interface{}{
 		"system": map[string]interface{}{
-			"running":    mcs.running,
-			"uptime":     time.Since(time.Now()).String(),
-			"config":     mcs.configManager.GetConfigPath(),
+			"running": mcs.running,
+			"uptime":  time.Since(time.Now()).String(),
+			"config":  mcs.configManager.GetConfigPath(),
 		},
-		"devices": mcs.deviceManager.GetDeviceStatuses(),
-		"scheduler": mcs.taskScheduler.Status(),
-		"executor": mcs.commandExecutor.Status(),
-		"queue": mcs.commandExecutor.GetExecutionQueue().GetStatus(),
+		"devices":    mcs.deviceManager.GetDeviceStatuses(),
+		"scheduler":  mcs.taskScheduler.Status(),
+		"executor":   mcs.commandExecutor.Status(),
+		"queue":      mcs.commandExecutor.GetExecutionQueue().GetStatus(),
 		"event_loop": mcs.eventLoop.GetModuleStatus(),
 	}
 
@@ -508,11 +508,11 @@ func (mcs *MotionControlSystem) handleAbstractCommandRequest(message types.IPCMe
 		}
 
 		response := types.IPCMessage{
-			Type:      "abstract_command_response",
-			Source:    "control_system",
-			Target:    message.Source,
+			Type:   "abstract_command_response",
+			Source: "control_system",
+			Target: message.Source,
 			Data: map[string]interface{}{
-				"command": "list",
+				"command":  "list",
 				"commands": commandDescriptions,
 			},
 			Timestamp: time.Now(),
@@ -544,9 +544,9 @@ func (mcs *MotionControlSystem) handleAbstractCommandRequest(message types.IPCMe
 	}
 
 	response := types.IPCMessage{
-		Type:      "abstract_command_response",
-		Source:    "control_system",
-		Target:    message.Source,
+		Type:   "abstract_command_response",
+		Source: "control_system",
+		Target: message.Source,
 		Data: map[string]interface{}{
 			"task_id": task.ID,
 			"command": string(abstractCmd),

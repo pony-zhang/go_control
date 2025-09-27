@@ -4,18 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build Commands
 
+### Using build.go (Recommended)
 ```bash
-# Build control and simulator binaries
-go build ./cmd/control
-go build ./cmd/simulator
+# Build all binaries to bin/ directory
+go run build.go
 
-# Build with output directory
-mkdir -p bin
+# Manual build
 go build -o bin/control ./cmd/control
 go build -o bin/simulator ./cmd/simulator
 ```
 
-## Testing Commands
+### Testing Commands
 
 ```bash
 # Run all tests
