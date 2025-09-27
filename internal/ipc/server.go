@@ -1,3 +1,7 @@
+// Package ipc implements a robust TCP-based inter-process communication system
+// that enables client applications to interact with the motion control system.
+// It provides message routing, client management, and protocol handling for remote
+// task submission, system monitoring, and configuration management.
 package ipc
 
 import (
@@ -6,12 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"time"
 
 	"control/pkg/types"
+	"control/internal/logging"
 )
 
 type Client struct {
@@ -33,6 +37,7 @@ type IPCServer struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
+	logger      *logging.Logger
 }
 
 func NewIPCServer(config types.IPCConfig) *IPCServer {
@@ -43,6 +48,7 @@ func NewIPCServer(config types.IPCConfig) *IPCServer {
 		handlers: make(map[string]func(types.IPCMessage)),
 		ctx:      ctx,
 		cancel:   cancel,
+		logger:   logging.GetLogger("ipc_server"),
 	}
 }
 
@@ -55,7 +61,7 @@ func (s *IPCServer) Start() error {
 		return fmt.Errorf("failed to start IPC server: %w", err)
 	}
 
-	log.Printf("IPC server started on %s", address)
+	s.logger.Info("IPC server started", "address", address)
 
 	s.wg.Add(1)
 	go s.acceptConnections()
@@ -102,7 +108,7 @@ func (s *IPCServer) safeCloseClient(client *Client) {
 		// Mark as inactive
 		client.Active = false
 
-		log.Printf("Client %s safely closed", client.ID)
+		s.logger.Info("Client safely closed", "client_id", client.ID)
 	})
 }
 
@@ -117,7 +123,7 @@ func (s *IPCServer) acceptConnections() {
 			conn, err := s.server.Accept()
 			if err != nil {
 				if !errors.Is(err, net.ErrClosed) {
-					log.Printf("Accept error: %v", err)
+					s.logger.Error("Accept error", "error", err)
 				}
 				continue
 			}
@@ -139,7 +145,7 @@ func (s *IPCServer) acceptConnections() {
 			go s.handleClient(client)
 			go s.sendToClient(client)
 
-			log.Printf("Client connected: %s", clientID)
+			s.logger.Info("Client connected", "client_id", clientID)
 		}
 	}
 }
@@ -159,16 +165,16 @@ func (s *IPCServer) handleClient(client *Client) {
 		default:
 			// Set a deadline for reading to detect client disconnection
 			if err := client.Conn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
-				log.Printf("Client %s set read deadline error: %v", client.ID, err)
+				s.logger.Error("Client set read deadline error", "client_id", client.ID, "error", err)
 				return
 			}
 
 			var message types.IPCMessage
 			if err := decoder.Decode(&message); err != nil {
 				if errors.Is(err, io.EOF) {
-					log.Printf("Client %s disconnected gracefully", client.ID)
+					s.logger.Info("Client disconnected gracefully", "client_id", client.ID)
 				} else if !errors.Is(err, net.ErrClosed) {
-					log.Printf("Client %s decode error: %v", client.ID, err)
+					s.logger.Error("Client decode error", "client_id", client.ID, "error", err)
 				}
 				return
 			}
@@ -203,14 +209,14 @@ func (s *IPCServer) sendToClient(client *Client) {
 
 			// Set write deadline
 			if err := client.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
-				log.Printf("Client %s set write deadline error: %v", client.ID, err)
+				s.logger.Error("Client set write deadline error", "client_id", client.ID, "error", err)
 				return
 			}
 
 			_, err := client.Conn.Write(data)
 			if err != nil {
 				if !errors.Is(err, net.ErrClosed) {
-					log.Printf("Send to client %s error: %v", client.ID, err)
+					s.logger.Error("Send to client error", "client_id", client.ID, "error", err)
 				}
 				return
 			}
@@ -245,7 +251,7 @@ func (s *IPCServer) Broadcast(message types.IPCMessage) error {
 			select {
 			case client.Send <- data:
 			default:
-				log.Printf("Client %s send buffer full", client.ID)
+				s.logger.Warn("Client send buffer full", "client_id", client.ID)
 			}
 		}
 	}

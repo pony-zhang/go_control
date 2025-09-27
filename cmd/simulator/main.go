@@ -1,3 +1,4 @@
+// Command simulator implements a test client for the motion control system
 package main
 
 import (

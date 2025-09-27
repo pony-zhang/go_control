@@ -1,11 +1,13 @@
+// Package comm provides base communication interfaces and implementations
 package comm
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
+
+	"control/internal/logging"
 )
 
 // BaseCommunication 基础通信实现
@@ -18,6 +20,7 @@ type BaseCommunication struct {
 	mutex         sync.RWMutex
 	ctx           context.Context
 	cancel        context.CancelFunc
+	logger        *logging.Logger
 }
 
 // NewBaseCommunication 创建基础通信实例
@@ -29,6 +32,7 @@ func NewBaseCommunication(config ConnectionConfig) *BaseCommunication {
 		eventHandlers: make([]EventHandler, 0),
 		ctx:          ctx,
 		cancel:       cancel,
+		logger:       logging.GetLogger("base_communication"),
 	}
 }
 
@@ -95,7 +99,7 @@ func (bc *BaseCommunication) emitEvent(callback func(EventHandler)) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("Event handler panic: %v", r)
+					bc.logger.Error("Event handler panic", "panic", r)
 				}
 			}()
 			callback(handler)
@@ -190,7 +194,7 @@ func (bc *BaseCommunication) RetryWithTimeout(ctx context.Context, operation fun
 			return ctx.Err()
 		}
 
-		log.Printf("Retry %d/%d after error: %v", i+1, bc.config.RetryCount, err)
+		bc.logger.Warn("Retry after error", "attempt", i+1, "max_attempts", bc.config.RetryCount, "error", err)
 	}
 
 	return fmt.Errorf("operation failed after %d retries, last error: %w", bc.config.RetryCount, lastErr)

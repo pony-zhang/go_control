@@ -1,3 +1,4 @@
+// Package ipc implements TCP-based inter-process communication client
 package ipc
 
 import (
@@ -6,12 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"time"
 
 	"control/pkg/types"
+	"control/internal/logging"
 )
 
 type IPCClient struct {
@@ -27,6 +28,7 @@ type IPCClient struct {
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
 	connected    bool
+	logger       *logging.Logger
 }
 
 func NewIPCClient(config types.IPCConfig) *IPCClient {
@@ -38,6 +40,7 @@ func NewIPCClient(config types.IPCConfig) *IPCClient {
 		handlers:    make(map[string]func(types.IPCMessage)),
 		ctx:         ctx,
 		cancel:      cancel,
+		logger:      logging.GetLogger("ipc_client"),
 	}
 }
 
@@ -58,7 +61,7 @@ func (c *IPCClient) Connect() error {
 	go c.receiveMessages()
 	go c.sendMessages()
 
-	log.Printf("Connected to IPC server at %s", address)
+	c.logger.Info("Connected to IPC server", "address", address)
 	return nil
 }
 
@@ -99,9 +102,9 @@ func (c *IPCClient) Disconnect() {
 
 	select {
 	case <-done:
-		log.Printf("Client disconnected gracefully")
+		c.logger.Info("Client disconnected gracefully")
 	case <-time.After(3 * time.Second):
-		log.Printf("Client disconnect timeout, forcing shutdown")
+		c.logger.Warn("Client disconnect timeout, forcing shutdown")
 	}
 }
 
@@ -150,7 +153,7 @@ func (c *IPCClient) receiveMessages() {
 				if !c.connected {
 					return
 				}
-				log.Printf("Set read deadline error: %v", err)
+				c.logger.Error("Set read deadline error", "error", err)
 				c.connected = false
 				return
 			}
@@ -158,13 +161,13 @@ func (c *IPCClient) receiveMessages() {
 			var message types.IPCMessage
 			if err := c.decoder.Decode(&message); err != nil {
 				if errors.Is(err, io.EOF) {
-					log.Printf("Server disconnected gracefully")
+					c.logger.Info("Server disconnected gracefully")
 				} else if errors.Is(err, net.ErrClosed) {
-					log.Printf("Connection closed")
+					c.logger.Info("Connection closed")
 				} else if !c.connected {
 					return
 				} else {
-					log.Printf("Receive error: %v", err)
+					c.logger.Error("Receive error", "error", err)
 				}
 				c.connected = false
 				return
@@ -198,16 +201,16 @@ func (c *IPCClient) sendMessages() {
 
 			// Set write deadline
 			if err := c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
-				log.Printf("Set write deadline error: %v", err)
+				c.logger.Error("Set write deadline error", "error", err)
 				c.connected = false
 				return
 			}
 
 			if _, err := c.conn.Write(data); err != nil {
 				if errors.Is(err, net.ErrClosed) {
-					log.Printf("Connection closed during send")
+					c.logger.Info("Connection closed during send")
 				} else {
-					log.Printf("Send error: %v", err)
+					c.logger.Error("Send error", "error", err)
 				}
 				c.connected = false
 				return
@@ -233,7 +236,7 @@ func (c *IPCClient) routeMessage(message types.IPCMessage) {
 		case <-c.ctx.Done():
 			// Client is shutting down
 		case <-time.After(100 * time.Millisecond):
-			log.Printf("Receive channel full, dropping message type: %s", message.Type)
+			c.logger.Warn("Receive channel full, dropping message", "message_type", message.Type)
 		}
 	}
 }

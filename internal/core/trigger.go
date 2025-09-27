@@ -1,13 +1,14 @@
+// Package core implements task trigger management for motion control
 package core
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"control/pkg/types"
+	"control/internal/logging"
 )
 
 type TriggerSource struct {
@@ -26,6 +27,7 @@ type TaskTrigger struct {
 	wg           sync.WaitGroup
 	taskChan     chan *types.Task
 	running      bool
+	logger       *logging.Logger
 }
 
 func NewTaskTrigger(config types.SystemConfig) *TaskTrigger {
@@ -33,6 +35,7 @@ func NewTaskTrigger(config types.SystemConfig) *TaskTrigger {
 		triggers: make(map[string]*TriggerSource),
 		config:   config,
 		taskChan: make(chan *types.Task, 100),
+		logger:   logging.GetLogger("task_trigger"),
 	}
 }
 
@@ -47,7 +50,7 @@ func (tt *TaskTrigger) Start(ctx context.Context) error {
 	tt.wg.Add(1)
 	go tt.run()
 
-	log.Println("Task trigger started")
+	tt.logger.Info("Task trigger started")
 	return nil
 }
 
@@ -62,7 +65,7 @@ func (tt *TaskTrigger) Stop() error {
 	tt.wg.Wait()
 	tt.running = false
 
-	log.Println("Task trigger stopped")
+	tt.logger.Info("Task trigger stopped")
 	return nil
 }
 
@@ -80,7 +83,7 @@ func (tt *TaskTrigger) AddTrigger(source string, triggerFunc func() *types.Task)
 		Enabled: true,
 	}
 
-	log.Printf("Trigger added: %s", source)
+	tt.logger.Info("Trigger added", "source", source)
 	return nil
 }
 
@@ -93,7 +96,7 @@ func (tt *TaskTrigger) RemoveTrigger(source string) error {
 	}
 
 	delete(tt.triggers, source)
-	log.Printf("Trigger removed: %s", source)
+	tt.logger.Info("Trigger removed", "source", source)
 	return nil
 }
 
@@ -192,7 +195,7 @@ func (tt *TaskTrigger) checkTriggers() {
 		task := trigger.Trigger()
 		if task != nil {
 			if err := tt.ValidateTrigger(task); err != nil {
-				log.Printf("Trigger validation failed for %s: %v", trigger.Name, err)
+				tt.logger.Error("Trigger validation failed", "trigger_name", trigger.Name, "error", err)
 				continue
 			}
 
@@ -202,9 +205,9 @@ func (tt *TaskTrigger) checkTriggers() {
 			select {
 			case tt.taskChan <- task:
 				trigger.LastTrigger = time.Now()
-				log.Printf("Task triggered from %s: %s", trigger.Name, task.ID)
+				tt.logger.Info("Task triggered", "trigger_name", trigger.Name, "task_id", task.ID)
 			default:
-				log.Printf("Task channel full, dropping task from %s", trigger.Name)
+				tt.logger.Warn("Task channel full, dropping task", "trigger_name", trigger.Name)
 			}
 		}
 	}

@@ -1,3 +1,4 @@
+// Package types implements task node structures for complex workflows
 package types
 
 import (

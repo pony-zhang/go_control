@@ -1,3 +1,6 @@
+// Package core defines the core interfaces and abstractions for the motion control system.
+// It provides the foundation for implementing modular and extensible motion control
+// components including event loops, task scheduling, command execution, and device management.
 package core
 
 import (

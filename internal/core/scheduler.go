@@ -1,12 +1,13 @@
+// Package core implements priority-based task scheduling for motion control
 package core
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
+	"control/internal/logging"
 	"control/pkg/types"
 )
 
@@ -78,6 +79,7 @@ type TaskScheduler struct {
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
 	running       bool
+	logger        *logging.Logger
 }
 
 func NewTaskScheduler(config types.SystemConfig) *TaskScheduler {
@@ -89,6 +91,7 @@ func NewTaskScheduler(config types.SystemConfig) *TaskScheduler {
 		activeTasks:        make(map[string]*types.Task),
 		taskChan:          make(chan *types.Task, 100),
 		config:            config,
+		logger:            logging.GetLogger("scheduler"),
 	}
 }
 
@@ -103,7 +106,7 @@ func (ts *TaskScheduler) Start(ctx context.Context) error {
 	ts.wg.Add(1)
 	go ts.schedule()
 
-	log.Println("Task scheduler started")
+	ts.logger.Info("Task scheduler started")
 	return nil
 }
 
@@ -118,7 +121,7 @@ func (ts *TaskScheduler) Stop() error {
 	ts.wg.Wait()
 	ts.running = false
 
-	log.Println("Task scheduler stopped")
+	ts.logger.Info("Task scheduler stopped")
 	return nil
 }
 
@@ -142,7 +145,7 @@ func (ts *TaskScheduler) ScheduleTask(task *types.Task) error {
 		ts.mediumPriorityQueue.Push(task)
 	}
 
-	log.Printf("Task scheduled: %s (priority: %d)", task.ID, task.Priority)
+	ts.logger.Info("Task scheduled", "task_id", task.ID, "priority", task.Priority)
 	return nil
 }
 
@@ -261,7 +264,7 @@ func (ts *TaskScheduler) executeTask(task *types.Task) {
 
 	select {
 	case ts.taskChan <- task:
-		log.Printf("Task execution started: %s", task.ID)
+		ts.logger.Info("Task execution started", "task_id", task.ID)
 
 		go func() {
 			<-ctx.Done()
@@ -287,7 +290,7 @@ func (ts *TaskScheduler) executeTask(task *types.Task) {
 		delete(ts.activeTasks, task.ID)
 		ts.activeLock.Unlock()
 
-		log.Printf("Task channel full, rejecting task: %s", task.ID)
+		ts.logger.Warn("Task channel full, rejecting task", "task_id", task.ID)
 	}
 }
 

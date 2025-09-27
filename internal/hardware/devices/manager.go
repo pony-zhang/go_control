@@ -3,7 +3,6 @@ package devices
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"control/internal/hardware/protocols/modbus"
 	"control/internal/hardware/protocols/serial"
 	"control/pkg/types"
+	"control/internal/logging"
 )
 
 // DeviceType 设备类型
@@ -379,6 +379,7 @@ type DeviceManager struct {
 	eventChan  chan DeviceEvent
 	autoScan   bool
 	scanTicker *time.Ticker
+	logger     *logging.Logger
 }
 
 // DeviceEvent 设备事件
@@ -398,6 +399,7 @@ func NewDeviceManager() *DeviceManager {
 		ctx:       ctx,
 		cancel:    cancel,
 		eventChan: make(chan DeviceEvent, 100),
+		logger:    logging.GetLogger("device_manager"),
 	}
 }
 
@@ -431,7 +433,7 @@ func (dm *DeviceManager) AddDevice(config DeviceConfig) error {
 			ctx, cancel := context.WithTimeout(dm.ctx, config.Timeout)
 			defer cancel()
 			if err := device.Connect(ctx); err != nil {
-				log.Printf("Failed to auto-connect device %s: %v", config.ID, err)
+				dm.logger.Error("Failed to auto-connect device", "device_id", config.ID, "error", err)
 			}
 		}()
 	}
@@ -444,7 +446,7 @@ func (dm *DeviceManager) AddDevice(config DeviceConfig) error {
 		Data:      config,
 	})
 
-	log.Printf("Device %s (%s) added successfully", config.ID, config.Name)
+	dm.logger.Info("Device added successfully", "device_id", config.ID, "device_name", config.Name)
 	return nil
 }
 
@@ -461,7 +463,7 @@ func (dm *DeviceManager) RemoveDevice(deviceID string) error {
 	// 断开连接
 	if device.IsConnected() {
 		if err := device.Disconnect(dm.ctx); err != nil {
-			log.Printf("Failed to disconnect device %s: %v", deviceID, err)
+			dm.logger.Error("Failed to disconnect device", "device_id", deviceID, "error", err)
 		}
 	}
 
@@ -476,7 +478,7 @@ func (dm *DeviceManager) RemoveDevice(deviceID string) error {
 		Timestamp: time.Now(),
 	})
 
-	log.Printf("Device %s removed successfully", deviceID)
+	dm.logger.Info("Device removed successfully", "device_id", deviceID)
 	return nil
 }
 
@@ -608,7 +610,7 @@ func (dm *DeviceManager) StartAutoScan(interval time.Duration) {
 		}
 	}()
 
-	log.Printf("Auto scan started with interval %v", interval)
+	dm.logger.Info("Auto scan started", "interval", interval)
 }
 
 // StopAutoScan 停止自动扫描
@@ -626,7 +628,7 @@ func (dm *DeviceManager) StopAutoScan() {
 		dm.scanTicker = nil
 	}
 
-	log.Printf("Auto scan stopped")
+	dm.logger.Info("Auto scan stopped")
 }
 
 // scanDevices 扫描设备
@@ -648,7 +650,7 @@ func (dm *DeviceManager) scanDevices() {
 			// 尝试重连断开的设备
 			go func(deviceID string) {
 				if err := dm.ReconnectDevice(deviceID); err != nil {
-					log.Printf("Failed to reconnect device %s: %v", deviceID, err)
+					dm.logger.Error("Failed to reconnect device", "device_id", deviceID, "error", err)
 				}
 			}(config.ID)
 		}
@@ -665,7 +667,7 @@ func (dm *DeviceManager) emitEvent(event DeviceEvent) {
 	select {
 	case dm.eventChan <- event:
 	default:
-		log.Printf("Event channel full, dropping event: %s", event.Type)
+		dm.logger.Warn("Event channel full, dropping event", "event_type", event.Type)
 	}
 }
 
@@ -694,7 +696,7 @@ func (dm *DeviceManager) Stop() error {
 	for _, device := range dm.devices {
 		if device.IsConnected() {
 			if err := device.Disconnect(dm.ctx); err != nil {
-				log.Printf("Failed to disconnect device %s: %v", device.GetID(), err)
+				dm.logger.Error("Failed to disconnect device", "device_id", device.GetID(), "error", err)
 			}
 		}
 	}

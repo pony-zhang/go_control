@@ -1,3 +1,4 @@
+// Package modbus implements Modbus protocol support for industrial automation
 package modbus
 
 import (

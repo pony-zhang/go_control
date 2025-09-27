@@ -1,11 +1,15 @@
+// Package core implements the central event loop that coordinates all motion control operations.
+// The event loop provides a configurable interval-based processing system that drives
+// task execution, device communication, and system state updates in a unified timing framework.
 package core
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
+
+	"control/internal/logging"
 )
 
 type EventLoop struct {
@@ -16,12 +20,14 @@ type EventLoop struct {
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
 	running     bool
+	logger      *logging.Logger
 }
 
 func NewEventLoop(interval time.Duration) *EventLoop {
 	return &EventLoop{
 		interval: interval,
 		modules:  make(map[string]Module),
+		logger:   logging.GetLogger("event_loop"),
 	}
 }
 
@@ -36,7 +42,7 @@ func (el *EventLoop) Start(ctx context.Context) error {
 	el.wg.Add(1)
 	go el.run()
 
-	log.Printf("Event loop started with interval %v", el.interval)
+	el.logger.Info("Event loop started", "interval", el.interval)
 	return nil
 }
 
@@ -49,9 +55,9 @@ func (el *EventLoop) Stop() error {
 
 	el.modulesLock.Lock()
 	for name, module := range el.modules {
-		log.Printf("Stopping module: %s", name)
+		el.logger.Info("Stopping module", "module_name", name)
 		if err := module.Stop(); err != nil {
-			log.Printf("Error stopping module %s: %v", name, err)
+			el.logger.Error("Error stopping module", "module_name", name, "error", err)
 		}
 	}
 	el.modulesLock.Unlock()
@@ -59,7 +65,7 @@ func (el *EventLoop) Stop() error {
 	el.wg.Wait()
 	el.running = false
 
-	log.Println("Event loop stopped")
+	el.logger.Info("Event loop stopped")
 	return nil
 }
 
@@ -72,11 +78,11 @@ func (el *EventLoop) RegisterModule(name string, module Module) error {
 	}
 
 	el.modules[name] = module
-	log.Printf("Module registered: %s", name)
+	el.logger.Info("Module registered", "module_name", name)
 
 	if el.running {
 		if err := module.Start(el.ctx); err != nil {
-			log.Printf("Error starting module %s: %v", name, err)
+			el.logger.Error("Error starting module", "module_name", name, "error", err)
 			return err
 		}
 	}
@@ -95,12 +101,12 @@ func (el *EventLoop) UnregisterModule(name string) error {
 
 	if el.running {
 		if err := module.Stop(); err != nil {
-			log.Printf("Error stopping module %s: %v", name, err)
+			el.logger.Error("Error stopping module", "module_name", name, "error", err)
 		}
 	}
 
 	delete(el.modules, name)
-	log.Printf("Module unregistered: %s", name)
+	el.logger.Info("Module unregistered", "module_name", name)
 	return nil
 }
 
@@ -126,7 +132,7 @@ func (el *EventLoop) processCycle() {
 
 	for name, module := range el.modules {
 		if err := module.Process(); err != nil {
-			log.Printf("Error processing module %s: %v", name, err)
+			el.logger.Error("Error processing module", "module_name", name, "error", err)
 		}
 	}
 }

@@ -1,3 +1,6 @@
+// Package types defines the fundamental data structures and type definitions used throughout
+// the motion control system. It includes task definitions, command structures, device configurations,
+// and system state representations that form the common language between system components.
 package types
 
 import (

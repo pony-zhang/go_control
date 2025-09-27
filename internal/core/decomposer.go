@@ -1,3 +1,4 @@
+// Package core implements task decomposition and trajectory planning for motion control
 package core
 
 import (

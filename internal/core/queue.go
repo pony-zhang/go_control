@@ -1,13 +1,14 @@
+// Package core implements command execution queue management
 package core
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"control/pkg/types"
+	"control/internal/logging"
 )
 
 type CommandStatus int
@@ -47,6 +48,7 @@ type ExecutionQueue struct {
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
 	running     bool
+	logger      *logging.Logger
 }
 
 func NewExecutionQueue(maxSize int) *ExecutionQueue {
@@ -56,6 +58,7 @@ func NewExecutionQueue(maxSize int) *ExecutionQueue {
 		sendChan:     make(chan *QueuedCommand, 10),
 		completeChan: make(chan *QueuedCommand, 10),
 		maxSize:      maxSize,
+		logger:       logging.GetLogger("execution_queue"),
 	}
 }
 
@@ -71,7 +74,7 @@ func (eq *ExecutionQueue) Start(ctx context.Context) error {
 	go eq.processCommands()
 	go eq.handleCompletions()
 
-	log.Println("Execution queue started")
+	eq.logger.Info("Execution queue started")
 	return nil
 }
 
@@ -96,7 +99,7 @@ func (eq *ExecutionQueue) Stop() error {
 	eq.wg.Wait()
 	eq.running = false
 
-	log.Println("Execution queue stopped")
+	eq.logger.Info("Execution queue stopped")
 	return nil
 }
 
@@ -128,7 +131,7 @@ func (eq *ExecutionQueue) Push(cmd types.MotionCommand) error {
 
 	select {
 	case eq.sendChan <- queuedCmd:
-		log.Printf("Command queued: %s", cmd.ID)
+		eq.logger.Info("Command queued", "command_id", cmd.ID)
 		return nil
 	default:
 		eq.commandsLock.Lock()
@@ -201,7 +204,7 @@ func (eq *ExecutionQueue) Clear() error {
 	eq.taskCommands = make(map[string][]string)
 	eq.taskLock.Unlock()
 
-	log.Println("Execution queue cleared")
+	eq.logger.Info("Execution queue cleared")
 	return nil
 }
 
@@ -223,7 +226,7 @@ func (eq *ExecutionQueue) RemoveByTaskID(taskID string) error {
 	}
 	eq.taskLock.Unlock()
 
-	log.Printf("Removed commands for task: %s", taskID)
+	eq.logger.Info("Removed commands for task", "task_id", taskID)
 	return nil
 }
 
@@ -319,7 +322,7 @@ func (eq *ExecutionQueue) MarkCommandCompleted(cmdID string, err error) error {
 	select {
 	case eq.completeChan <- cmd:
 	default:
-		log.Printf("Complete channel full, dropping completion for command: %s", cmdID)
+		eq.logger.Warn("Complete channel full, dropping completion", "command_id", cmdID)
 	}
 
 	return nil
@@ -346,7 +349,7 @@ func (eq *ExecutionQueue) sendCommandToExecutor(cmd *QueuedCommand) {
 		defer cancel()
 
 		if err := eq.MarkCommandSent(cmd.Command.ID); err != nil {
-			log.Printf("Failed to mark command %s as sent: %v", cmd.Command.ID, err)
+			eq.logger.Error("Failed to mark command as sent", "command_id", cmd.Command.ID, "error", err)
 			return
 		}
 
@@ -393,7 +396,7 @@ func (eq *ExecutionQueue) cleanupCompletedCommand(cmd *QueuedCommand) {
 			}
 			eq.taskLock.Unlock()
 
-			log.Printf("Command completed and cleaned up: %s", cmd.Command.ID)
+			eq.logger.Info("Command completed and cleaned up", "command_id", cmd.Command.ID)
 		}
 	}
 }

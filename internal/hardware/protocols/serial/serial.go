@@ -1,3 +1,4 @@
+// Package serial implements serial communication protocol support
 package serial
 
 import (

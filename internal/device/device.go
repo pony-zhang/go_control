@@ -1,15 +1,18 @@
+// Package device provides comprehensive device management and communication protocol support.
+// It handles device discovery, connection management, and protocol abstraction for various
+// hardware devices including motor controllers, sensors, and I/O modules used in motion control systems.
 package device
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"control/pkg/types"
 	"control/internal/core"
 	"control/internal/hardware"
+	"control/internal/logging"
 )
 
 type BaseDevice struct {
@@ -86,13 +89,13 @@ func NewMockDevice(id types.DeviceID, config types.DeviceConfig) *MockDevice {
 
 func (md *MockDevice) Connect() error {
 	md.SetConnected(true)
-	log.Printf("Mock device %s connected", md.id)
+	logging.GetLogger("mock_device").Info("Mock device connected", "device_id", md.id)
 	return nil
 }
 
 func (md *MockDevice) Disconnect() {
 	md.SetConnected(false)
-	log.Printf("Mock device %s disconnected", md.id)
+	logging.GetLogger("mock_device").Info("Mock device disconnected", "device_id", md.id)
 }
 
 func (md *MockDevice) Write(cmd types.MotionCommand) error {
@@ -111,8 +114,8 @@ func (md *MockDevice) Write(cmd types.MotionCommand) error {
 		LastSeen:  time.Now(),
 	})
 
-	log.Printf("Mock device %s executed command %s: pos=%v, vel=%v",
-		md.id, cmd.CommandType, md.position, md.velocity)
+	logging.GetLogger("mock_device").Info("Mock device executed command",
+		"device_id", md.id, "command_type", cmd.CommandType, "position", md.position, "velocity", md.velocity)
 
 	return nil
 }
@@ -156,7 +159,7 @@ func (md *ModbusDevice) Connect() error {
 
 	md.client = client
 	md.SetConnected(true)
-	log.Printf("Modbus device %s connected to %s", md.id, md.endpoint)
+	logging.GetLogger("modbus_device").Info("Modbus device connected", "device_id", md.id, "endpoint", md.endpoint)
 	return nil
 }
 
@@ -166,7 +169,7 @@ func (md *ModbusDevice) Disconnect() {
 		md.client = nil
 	}
 	md.SetConnected(false)
-	log.Printf("Modbus device %s disconnected", md.id)
+	logging.GetLogger("modbus_device").Info("Modbus device disconnected", "device_id", md.id)
 }
 
 func (md *ModbusDevice) Write(cmd types.MotionCommand) error {
@@ -308,7 +311,7 @@ func NewModbusClient(endpoint string, timeout time.Duration) (*ModbusClient, err
 }
 
 func (mc *ModbusClient) ReadHoldingRegisters(address, quantity uint16) ([]uint16, error) {
-	log.Printf("Modbus read holding registers: address=%d, quantity=%d", address, quantity)
+	logging.GetLogger("modbus_client").Debug("Modbus read holding registers", "address", address, "quantity", quantity)
 
 	values := make([]uint16, quantity)
 	for i := range values {
@@ -319,17 +322,17 @@ func (mc *ModbusClient) ReadHoldingRegisters(address, quantity uint16) ([]uint16
 }
 
 func (mc *ModbusClient) WriteHoldingRegisters(address uint16, values []uint16) error {
-	log.Printf("Modbus write holding registers: address=%d, values=%v", address, values)
+	logging.GetLogger("modbus_client").Debug("Modbus write holding registers", "address", address, "values", values)
 	return nil
 }
 
 func (mc *ModbusClient) WriteSingleRegister(address, value uint16) error {
-	log.Printf("Modbus write single register: address=%d, value=%d", address, value)
+	logging.GetLogger("modbus_client").Debug("Modbus write single register", "address", address, "value", value)
 	return nil
 }
 
 func (mc *ModbusClient) Close() {
-	log.Printf("Modbus client closed")
+	logging.GetLogger("modbus_client").Info("Modbus client closed")
 }
 
 // HardwareDevice wraps the new hardware abstraction layer for compatibility
@@ -353,14 +356,14 @@ func NewHardwareDevice(id types.DeviceID, config types.DeviceConfig, hardwareMgr
 func (hd *HardwareDevice) Connect() error {
 	// The hardware manager already handles connection, just update status
 	hd.SetConnected(true)
-	log.Printf("Hardware device %s connected", hd.id)
+	logging.GetLogger("hardware_device").Info("Hardware device connected", "device_id", hd.id)
 	return nil
 }
 
 func (hd *HardwareDevice) Disconnect() {
 	// The hardware manager handles disconnection
 	hd.SetConnected(false)
-	log.Printf("Hardware device %s disconnected", hd.id)
+	logging.GetLogger("hardware_device").Info("Hardware device disconnected", "device_id", hd.id)
 }
 
 func (hd *HardwareDevice) Write(cmd types.MotionCommand) error {
@@ -507,6 +510,7 @@ type DeviceManager struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
+	logger        *logging.Logger
 }
 
 func NewDeviceManager(config types.SystemConfig) *DeviceManager {
@@ -514,6 +518,7 @@ func NewDeviceManager(config types.SystemConfig) *DeviceManager {
 		devices:     make(map[types.DeviceID]core.Device),
 		config:      config,
 		hardwareMgr: hardware.NewHardwareFactory(),
+		logger:      logging.GetLogger("device_manager"),
 	}
 }
 
@@ -522,21 +527,21 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	// Start hardware abstraction layer
 	if err := dm.hardwareMgr.Start(); err != nil {
-		log.Printf("Warning: Failed to start hardware manager: %v", err)
+		dm.logger.Warn("Failed to start hardware manager", "error", err)
 	}
 
 	// Convert and add devices from configuration
 	for deviceID, deviceConfig := range dm.config.Devices {
 		// Add device to hardware manager
 		if err := dm.hardwareMgr.AddDeviceFromConfig(string(deviceID), deviceConfig); err != nil {
-			log.Printf("Failed to add hardware device %s: %v", deviceID, err)
+			dm.logger.Error("Failed to add hardware device", "device_id", deviceID, "error", err)
 			continue
 		}
 
 		// Create wrapper device for compatibility with existing system
 		device, err := dm.createDevice(deviceID, deviceConfig)
 		if err != nil {
-			log.Printf("Failed to create device wrapper %s: %v", deviceID, err)
+			dm.logger.Error("Failed to create device wrapper", "device_id", deviceID, "error", err)
 			continue
 		}
 
@@ -546,13 +551,13 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 		// Connect to hardware device
 		if err := dm.hardwareMgr.ConnectDevice(string(deviceID)); err != nil {
-			log.Printf("Failed to connect hardware device %s: %v", deviceID, err)
+			dm.logger.Error("Failed to connect hardware device", "device_id", deviceID, "error", err)
 		} else if err := device.Connect(); err != nil {
-			log.Printf("Failed to connect device wrapper %s: %v", deviceID, err)
+			dm.logger.Error("Failed to connect device wrapper", "device_id", deviceID, "error", err)
 		}
 	}
 
-	log.Printf("Device manager started with %d devices", len(dm.devices))
+	dm.logger.Info("Device manager started", "device_count", len(dm.devices))
 	return nil
 }
 
@@ -564,7 +569,7 @@ func (dm *DeviceManager) Stop() error {
 	// Stop hardware abstraction layer
 	if dm.hardwareMgr != nil {
 		if err := dm.hardwareMgr.Stop(); err != nil {
-			log.Printf("Error stopping hardware manager: %v", err)
+			dm.logger.Error("Error stopping hardware manager", "error", err)
 		}
 	}
 
@@ -576,7 +581,7 @@ func (dm *DeviceManager) Stop() error {
 
 	dm.wg.Wait()
 
-	log.Println("Device manager stopped")
+	dm.logger.Info("Device manager stopped")
 	return nil
 }
 

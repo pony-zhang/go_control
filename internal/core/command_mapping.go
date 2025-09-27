@@ -1,3 +1,4 @@
+// Package core implements abstract command mapping for motion control
 package core
 
 import (

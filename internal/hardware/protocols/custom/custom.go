@@ -1,3 +1,4 @@
+// Package custom implements custom protocol support for hardware communication
 package custom
 
 import (

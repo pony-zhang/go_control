@@ -1,3 +1,7 @@
+// Command control implements the main motion control system that orchestrates
+// all system components including event loops, task scheduling, device management,
+// and inter-process communication. It provides the primary entry point for the
+// motion control application with graceful startup and shutdown handling.
 package main
 
 import (

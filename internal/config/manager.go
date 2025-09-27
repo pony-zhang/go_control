@@ -1,15 +1,18 @@
+// Package config provides comprehensive YAML-based configuration management with
+// hot-reload capabilities. It handles device configurations, axis parameters, safety limits,
+// task templates, and system settings that can be updated at runtime without service interruption.
 package config
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 	"control/pkg/types"
+	"control/internal/logging"
 )
 
 type ConfigManager struct {
@@ -23,12 +26,14 @@ type ConfigManager struct {
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
 	watching      bool
+	logger        *logging.Logger
 }
 
 func NewConfigManager(configPath string) *ConfigManager {
 	return &ConfigManager{
 		configPath:   configPath,
 		watchers:     make([]func(types.SystemConfig), 0),
+		logger:       logging.GetLogger("config_manager"),
 	}
 }
 
@@ -57,7 +62,7 @@ func (cm *ConfigManager) LoadConfig(path string) error {
 	cm.config = config
 	cm.lastModified = time.Now()
 
-	log.Printf("Configuration loaded from %s", cm.configPath)
+	cm.logger.Info("Configuration loaded", "config_path", cm.configPath)
 	return nil
 }
 
@@ -92,7 +97,7 @@ func (cm *ConfigManager) SetConfig(config types.SystemConfig) error {
 	cm.lastModified = time.Now()
 
 	cm.notifyWatchers()
-	log.Printf("Configuration updated and saved to %s", cm.configPath)
+	cm.logger.Info("Configuration updated and saved", "config_path", cm.configPath)
 	return nil
 }
 
@@ -115,7 +120,7 @@ func (cm *ConfigManager) StartWatching(ctx context.Context) error {
 	cm.wg.Add(1)
 	go cm.watchFile()
 
-	log.Printf("Started watching config file: %s", cm.configPath)
+	cm.logger.Info("Started watching config file", "config_path", cm.configPath)
 	return nil
 }
 
@@ -128,7 +133,7 @@ func (cm *ConfigManager) StopWatching() error {
 	cm.wg.Wait()
 	cm.watching = false
 
-	log.Println("Stopped watching config file")
+	cm.logger.Info("Stopped watching config file")
 	return nil
 }
 
@@ -152,15 +157,15 @@ func (cm *ConfigManager) checkFileChanges() {
 	info, err := os.Stat(cm.configPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			log.Printf("Error checking config file: %v", err)
+			cm.logger.Error("Error checking config file", "error", err)
 		}
 		return
 	}
 
 	if info.ModTime().After(cm.lastModified) {
-		log.Printf("Config file modified, reloading...")
+		cm.logger.Info("Config file modified, reloading...")
 		if err := cm.Reload(); err != nil {
-			log.Printf("Failed to reload config: %v", err)
+			cm.logger.Error("Failed to reload config", "error", err)
 		} else {
 			cm.notifyWatchers()
 		}
@@ -628,7 +633,7 @@ func (cm *ConfigManager) ExportConfig(path string) error {
 		return fmt.Errorf("failed to write export file: %w", err)
 	}
 
-	log.Printf("Configuration exported to %s", path)
+	cm.logger.Info("Configuration exported", "path", path)
 	return nil
 }
 
@@ -641,7 +646,7 @@ func (cm *ConfigManager) ImportConfig(path string) error {
 		return fmt.Errorf("failed to save imported config: %w", err)
 	}
 
-	log.Printf("Configuration imported from %s", path)
+	cm.logger.Info("Configuration imported", "path", path)
 	return nil
 }
 

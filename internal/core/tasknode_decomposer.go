@@ -1,3 +1,4 @@
+// Package core implements task node decomposition for complex motion sequences
 package core
 
 import (
