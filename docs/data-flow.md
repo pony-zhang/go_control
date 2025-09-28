@@ -2,7 +2,7 @@
 
 ## 数据流总览
 
-运动控制系统的数据流遵循分层处理模式，从外部请求到物理设备执行，经过多个处理阶段。每个阶段都有明确的职责边界和数据转换规则。
+运动控制系统的数据流遵循先进的分层处理模式，从外部请求到物理设备执行，经过协调层、基础设施层、应用层的多个水平子层处理阶段。每个层次都有明确的职责边界和数据转换规则，确保系统的可靠性和可维护性。
 
 ## 主要数据结构
 
@@ -54,15 +54,15 @@ type IPCMessage struct {
 
 ## 数据流详细分析
 
-### 1. 任务请求流程
+### 1. 任务请求流程 (新架构)
 
 ```
-外部客户端 → IPC服务器 → 任务处理
+外部客户端 → IPC服务器 → 业务逻辑层 → 任务编排层 → 服务协调层 → HAL → 物理设备
 ```
 
 **步骤详解**:
 
-1. **客户端连接** (IPC Server)
+1. **客户端连接** (IPC Server - 基础设施层)
    ```go
    // TCP连接建立
    conn, err := ln.Accept()
@@ -74,69 +74,95 @@ type IPCMessage struct {
    }
    ```
 
-2. **消息接收** (IPC Server)
+2. **消息接收和路由** (IPC Server → ApplicationManager)
    ```go
-   // 消息解码和路由
+   // 消息解码和路由到业务逻辑层
    for message := range client.ReceiveChan {
        if handler, exists := s.handlers[message.Type]; exists {
-           go handler(message)
+           go handler(message)  // 委托给ApplicationManager处理
        }
    }
    ```
 
-3. **任务创建** (Task Handler)
+3. **抽象命令处理** (Business Logic Layer)
    ```go
-   // 根据消息类型创建任务
-   task := &types.Task{
-       ID:        fmt.Sprintf("task-%d", time.Now().UnixNano()),
-       Type:      types.CommandType(taskData["type"].(string)),
-       Priority:  types.PriorityMedium,
-       Status:    types.StatusPending,
-       CreatedAt: time.Now(),
+   // 业务逻辑层处理高级抽象命令
+   func (am *ApplicationManager) handleAbstractCommandRequest(message types.IPCMessage) {
+       abstractCmd, params := am.parseAbstractCommand(message)
+       task, err := am.businessLogic.ExecuteAbstractCommand(abstractCmd, params)
+       // 业务规则验证、安全检查、任务创建
    }
    ```
 
-### 2. 任务验证和调度流程
+4. **任务编排** (Task Orchestration Layer)
+   ```go
+   // 任务调度和分解
+   func (tol *TaskOrchestrationLayer) ExecuteAbstractCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) (*types.Task, error) {
+       task, err := tol.commandMappingMgr.ExecuteAbstractCommand(abstractCmd, params)
+       return tol.taskScheduler.ScheduleTask(task)
+   }
+   ```
+
+### 2. 任务验证和调度流程 (新架构)
 
 ```
-任务创建 → 验证 → 优先级调度 → 执行队列
+抽象命令 → 业务验证 → 资源分配 → 任务调度 → 服务协调 → HAL执行
 ```
 
 **步骤详解**:
 
-1. **任务验证** (Task Trigger)
+1. **业务规则验证** (Business Logic Layer)
    ```go
-   // 验证任务参数
-   if err := validateTaskConstraints(task, systemConfig); err != nil {
-       return fmt.Errorf("task validation failed: %w", err)
+   // 业务规则验证和安全检查
+   func (bll *BusinessLogicLayer) ExecuteAbstractCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) (*types.Task, error) {
+       // 输入参数验证
+       if err := bll.validationManager.ValidateCommand(abstractCmd, params); err != nil {
+           return nil, fmt.Errorf("command validation failed: %w", err)
+       }
+
+       // 业务规则应用
+       if err := bll.businessRules.ApplyRules(abstractCmd, params); err != nil {
+           return nil, fmt.Errorf("business rules validation failed: %w", err)
+       }
+
+       // 安全检查
+       if err := bll.safetyManager.CheckCommandSafety(abstractCmd, params); err != nil {
+           return nil, fmt.Errorf("safety check failed: %w", err)
+       }
    }
    ```
 
-2. **优先级分配** (Task Scheduler)
+2. **资源分配** (Service Coordination Layer → HAL)
    ```go
-   // 根据任务类型分配优先级
-   switch task.Type {
-   case types.CommandTypeEmergencyStop:
-       task.Priority = types.PriorityEmergency
-   case types.CommandTypeMoveTo:
-       task.Priority = types.PriorityHigh
-   default:
-       task.Priority = types.PriorityMedium
+   // 硬件资源动态分配
+   func (scl *ServiceCoordinationLayer) ExecuteCommand(ctx context.Context, cmd types.MotionCommand) error {
+       // 分配设备资源
+       if err := scl.AllocateDeviceResource(cmd.DeviceID); err != nil {
+           return fmt.Errorf("device resource allocation failed: %w", err)
+       }
+
+       // 通过HAL执行命令
+       return scl.hal.ExecuteCommand(ctx, cmd)
    }
    ```
 
-3. **队列分配** (Task Scheduler)
+3. **任务调度和分解** (Task Orchestration Layer)
    ```go
-   // 根据优先级放入相应队列
-   switch task.Priority {
-   case types.PriorityEmergency:
-       ts.emergencyQueue.Push(task)
-   case types.PriorityHigh:
-       ts.highPriorityQueue.Push(task)
-   case types.PriorityMedium:
-       ts.mediumPriorityQueue.Push(task)
-   case types.PriorityLow:
-       ts.lowPriorityQueue.Push(task)
+   // 任务调度和分解处理
+   func (tol *TaskOrchestrationLayer) processTask(task *types.Task) {
+       // 分解任务为命令序列
+       commands, err := tol.taskDecomposer.DecomposeTask(task)
+       if err != nil {
+           tol.logger.Error("Failed to decompose task", "task_id", task.ID, "error", err)
+           return
+       }
+
+       // 通过服务协调层执行命令
+       for _, cmd := range commands {
+           if err := tol.serviceCoordination.ExecuteCommand(tol.ctx, cmd); err != nil {
+               tol.logger.Error("Failed to execute command", "command_id", cmd.ID, "error", err)
+           }
+       }
    }
    ```
 
