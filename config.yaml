@@ -8,95 +8,6 @@ devices:
     parameters: {}
     timeout: 10s
     retry_count: 0
-
-  # Modbus TCP设备示例
-  modbus-tcp-device:
-    type: motor_controller
-    protocol: modbus_tcp
-    endpoint: 192.168.1.100:502
-    parameters:
-      type: tcp
-      address: 192.168.1.100
-      port: 502
-      slave_id: 1
-      timeout: 5s
-      retry_count: 3
-    timeout: 10s
-    retry_count: 3
-
-  # Modbus RTU设备示例
-  modbus-rtu-device:
-    type: motor_controller
-    protocol: modbus_rtu
-    endpoint: /dev/ttyUSB0
-    parameters:
-      type: rtu
-      address: /dev/ttyUSB0
-      baud_rate: 9600
-      data_bits: 8
-      stop_bits: 1
-      parity: N
-      slave_id: 2
-      timeout: 5s
-    timeout: 10s
-    retry_count: 3
-
-  # 串口设备示例
-  serial-device:
-    type: sensor
-    protocol: serial
-    endpoint: /dev/ttyUSB1
-    parameters:
-      port_name: /dev/ttyUSB1
-      baud_rate: 115200
-      data_bits: 8
-      stop_bits: 1
-      parity: N
-      flow_control: false
-      timeout: 5s
-    timeout: 10s
-    retry_count: 3
-
-  # 自定义协议设备示例
-  custom-protocol-device:
-    type: custom_controller
-    protocol: custom
-    endpoint: 192.168.1.200:8080
-    parameters:
-      protocol_type: binary
-      address: 192.168.1.200
-      port: 8080
-      timeout: 5s
-      frame_delimiter: "0D0A"
-      header: "AA55"
-      trailer: "0D0A"
-      checksum_method: crc16
-      big_endian: true
-      max_frame_size: 256
-      encoding: utf-8
-      commands:
-        - name: "read"
-          command_code: "01"
-          format: "binary"
-          fields:
-            - name: "address"
-              type: "uint16"
-              size: 2
-              offset: 0
-            - name: "length"
-              type: "uint8"
-              size: 1
-              offset: 2
-      responses:
-        - command_code: "01"
-          format: "binary"
-          fields:
-            - name: "data"
-              type: "bytes"
-              size: 0
-              offset: 0
-    timeout: 10s
-    retry_count: 3
 axes:
   axis-x:
     device_id: device-1
@@ -139,200 +50,188 @@ ipc:
   buffer_size: 1024
 task_templates:
   home_all:
-    name: "Home All Axes"
-    description: "Home all axes to their home positions"
-    type: "sequence"
+    name: Home All Axes
+    description: Home all axes to their home positions
+    type: sequence
     parameters:
-      mode: "sequential"
+      mode: sequential
       stop_on_error: true
     nodes:
-      - id: "home-x"
-        type: "home"
+      - id: home-x
+        type: home
         parameters:
-          axes: ["axis-x"]
-      - id: "home-y"
-        type: "home"
+          axes:
+            - axis-x
+      - id: home-y
+        type: home
         parameters:
-          axes: ["axis-y"]
-      - id: "home-z"
-        type: "home"
+          axes:
+            - axis-y
+      - id: home-z
+        type: home
         parameters:
-          axes: ["axis-z"]
+          axes:
+            - axis-z
     timeout: 30s
-    priority: 3  # High
-
-  safety_check:
-    name: "Safety Check Sequence"
-    description: "Check safety sensors before operation"
-    type: "sequence"
+    priority: 1
+  io_check:
+    name: IO Status Check
+    description: Check IO status before operation
+    type: sequence
     parameters:
-      mode: "sequential"
+      mode: sequential
       stop_on_error: true
     nodes:
-      - id: "check-emergency"
-        type: "io"
+      - id: check-sensor-1
+        type: io
         parameters:
-          device_id: "device-1"
-          channel: "emergency-stop"
-          action: "read"
-      - id: "check-door"
-        type: "io"
+          action: read
+          channel: sensor-1
+          device_id: device-1
+      - id: check-sensor-2
+        type: io
         parameters:
-          device_id: "device-1"
-          channel: "safety-door"
-          action: "read"
-      - id: "delay-check"
-        type: "delay"
-        parameters:
-          duration: 1s
-          unit: "s"
+          action: read
+          channel: sensor-2
+          device_id: device-1
     timeout: 5s
-    priority: 2  # Medium
-
-  motor_test:
-    name: "Motor Test Cycle"
-    description: "Test motor operation cycle"
-    type: "sequence"
+    priority: 2
+  motor_start_sequence:
+    name: Motor Start Sequence
+    description: Start motors with delay between each
+    type: sequence
     parameters:
-      mode: "sequential"
+      mode: sequential
       stop_on_error: true
     nodes:
-      - id: "start-motor"
-        type: "motor_control"
+      - id: start-motor-1
+        type: motor_control
         parameters:
-          device_id: "device-1"
-          motor_id: "motor-1"
-          action: "start"
-          speed: 100.0
-      - id: "wait-stable"
-        type: "delay"
-        parameters:
-          duration: 3s
-          unit: "s"
-      - id: "check-status"
-        type: "motor_status"
-        parameters:
-          device_id: "device-1"
-          motor_id: "motor-1"
-      - id: "stop-motor"
-        type: "motor_control"
-        parameters:
-          device_id: "device-1"
-          motor_id: "motor-1"
-          action: "stop"
-    timeout: 10s
-    priority: 1  # Low
-command_mappings:
-  self_check:
-    abstract_command: "self_check"
-    description: "执行系统自检"
-    template: "safety_check"
-    priority: 3  # High
-    timeout: 10s
-
-  reset:
-    abstract_command: "reset"
-    description: "复位系统到初始状态"
-    nodes:
-      - id: "stop-all"
-        type: "motor_control"
-        parameters:
-          device_id: "device-1"
-          motor_id: "all"
-          action: "stop"
-      - id: "reset-delay"
-        type: "delay"
+          action: start
+          device_id: device-1
+          motor_id: motor-1
+          speed: 100
+      - id: delay-1
+        type: delay
         parameters:
           duration: 2s
-          unit: "s"
-    priority: 3  # High
-    timeout: 15s
-
-  start:
-    abstract_command: "start"
-    description: "启动系统"
-    template: "safety_check"
-    priority: 2  # Medium
-    timeout: 20s
-
-  stop:
-    abstract_command: "stop"
-    description: "停止系统"
-    nodes:
-      - id: "stop-motors"
-        type: "motor_control"
+          unit: s
+      - id: start-motor-2
+        type: motor_control
         parameters:
-          device_id: "device-1"
-          motor_id: "all"
-          action: "stop"
-    priority: 3  # High
+          action: start
+          device_id: device-1
+          motor_id: motor-2
+          speed: 150
     timeout: 10s
-
+    priority: 2
+command_mappings:
   emergency_stop:
-    abstract_command: "emergency_stop"
-    description: "急停系统"
+    abstract_command: emergency_stop
+    description: 急停系统
     nodes:
-      - id: "emergency-stop-motors"
-        type: "motor_control"
+      - id: emergency-stop-motors
+        type: motor_control
         parameters:
-          device_id: "device-1"
-          motor_id: "all"
-          action: "stop"
-    priority: 0  # Emergency
+          action: stop
+          device_id: device-1
+          motor_id: all
+    priority: 0
     timeout: 5s
-
   home:
-    abstract_command: "home"
-    description: "回零所有轴"
-    template: "home_all"
-    priority: 3  # High
+    abstract_command: home
+    description: 回零所有轴
+    template: home_all
+    priority: 1
     timeout: 30s
-
   initialize:
-    abstract_command: "initialize"
-    description: "初始化系统"
+    abstract_command: initialize
+    description: 初始化系统
     nodes:
-      - id: "init-self-check"
-        type: "sequence"
+      - id: init-self-check
+        type: sequence
         parameters:
-          mode: "sequential"
+          mode: sequential
           stop_on_error: true
         children:
-          - id: "init-io-check"
-            type: "io"
+          - id: init-io-check
+            type: io
             parameters:
-              device_id: "device-1"
-              channel: "system-status"
-              action: "read"
-          - id: "init-delay"
-            type: "delay"
+              action: read
+              channel: system-status
+              device_id: device-1
+          - id: init-delay
+            type: delay
             parameters:
               duration: 1s
-              unit: "s"
-      - id: "init-home"
-        type: "sequence"
+              unit: s
+      - id: init-home
+        type: sequence
         parameters:
-          mode: "sequential"
+          mode: sequential
           stop_on_error: true
         children:
-          - id: "home-x"
-            type: "home"
+          - id: home-x
+            type: home
             parameters:
-              axes: ["axis-x"]
-          - id: "home-y"
-            type: "home"
+              axes:
+                - axis-x
+          - id: home-y
+            type: home
             parameters:
-              axes: ["axis-y"]
-          - id: "home-z"
-            type: "home"
+              axes:
+                - axis-y
+          - id: home-z
+            type: home
             parameters:
-              axes: ["axis-z"]
-    priority: 3  # High
-    timeout: 60s
-
-  safety_check:
-    abstract_command: "safety_check"
-    description: "安全检查"
-    template: "safety_check"
-    priority: 3  # High
+              axes:
+                - axis-z
+    priority: 1
+    timeout: 1m0s
+  reset:
+    abstract_command: reset
+    description: 复位系统到初始状态
+    nodes:
+      - id: stop-all
+        type: motor_control
+        parameters:
+          action: stop
+          device_id: device-1
+          motor_id: all
+      - id: reset-delay
+        type: delay
+        parameters:
+          duration: 2s
+          unit: s
+    priority: 1
     timeout: 15s
+  safety_check:
+    abstract_command: safety_check
+    description: 安全检查
+    template: safety_check
+    priority: 1
+    timeout: 15s
+  self_check:
+    abstract_command: self_check
+    description: 执行系统自检
+    template: io_check
+    priority: 1
+    timeout: 10s
+  start:
+    abstract_command: start
+    description: 启动系统
+    template: safety_check
+    priority: 2
+    timeout: 20s
+  stop:
+    abstract_command: stop
+    description: 停止系统
+    nodes:
+      - id: stop-motors
+        type: motor_control
+        parameters:
+          action: stop
+          device_id: device-1
+          motor_id: all
+    priority: 1
+    timeout: 10s
