@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"control/internal/config"
 	"control/internal/core"
@@ -122,6 +123,7 @@ func (mcs *MotionControlSystem) Stop() error {
 	log.Println("Stopping Motion Control System...")
 
 	if mcs.cancel != nil {
+		log.Println("Canceling system context...")
 		mcs.cancel()
 	}
 
@@ -130,22 +132,34 @@ func (mcs *MotionControlSystem) Stop() error {
 
 	// 1. 停止事件循环
 	if mcs.eventLoop != nil {
+		log.Println("Stopping event loop...")
 		if err := mcs.eventLoop.Stop(); err != nil {
+			log.Printf("Error stopping event loop: %v", err)
 			errs = append(errs, fmt.Errorf("event loop stop error: %w", err))
+		} else {
+			log.Println("Event loop stopped successfully")
 		}
 	}
 
 	// 2. 停止应用层
 	if mcs.application != nil {
+		log.Println("Stopping application layer...")
 		if err := mcs.application.Stop(); err != nil {
+			log.Printf("Error stopping application layer: %v", err)
 			errs = append(errs, fmt.Errorf("application layer stop error: %w", err))
+		} else {
+			log.Println("Application layer stopped successfully")
 		}
 	}
 
 	// 3. 停止基础设施层
 	if mcs.infrastructure != nil {
+		log.Println("Stopping infrastructure layer...")
 		if err := mcs.infrastructure.Stop(); err != nil {
+			log.Printf("Error stopping infrastructure layer: %v", err)
 			errs = append(errs, fmt.Errorf("infrastructure layer stop error: %w", err))
+		} else {
+			log.Println("Infrastructure layer stopped successfully")
 		}
 	}
 
@@ -290,8 +304,29 @@ func main() {
 	<-sigChan
 
 	fmt.Println("\nReceived shutdown signal...")
-	if err := system.Stop(); err != nil {
-		log.Printf("Error during shutdown: %v", err)
+
+	// 添加超时机制处理系统关闭
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	done := make(chan struct{})
+	go func() {
+		log.Println("Starting graceful shutdown...")
+		if err := system.Stop(); err != nil {
+			log.Printf("Error during shutdown: %v", err)
+			close(done)
+			return
+		}
+		log.Println("Graceful shutdown completed successfully")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		fmt.Println("Motion Control System shutdown complete")
+	case <-shutdownCtx.Done():
+		log.Println("Shutdown timeout reached, forcing exit")
+		fmt.Println("Motion Control System forced shutdown")
 		os.Exit(1)
 	}
 

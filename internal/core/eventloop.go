@@ -51,21 +51,34 @@ func (el *EventLoop) Stop() error {
 		return fmt.Errorf("event loop is not running")
 	}
 
-	el.cancel()
+	el.logger.Info("Starting event loop shutdown...")
 
+	// 取消事件循环的 context
+	el.cancel()
+	el.logger.Info("Event loop context canceled")
+
+	// 停止所有注册的模块
 	el.modulesLock.Lock()
+	moduleCount := len(el.modules)
+	el.logger.Info("Stopping modules", "count", moduleCount)
+
 	for name, module := range el.modules {
 		el.logger.Info("Stopping module", "module_name", name)
 		if err := module.Stop(); err != nil {
 			el.logger.Error("Error stopping module", "module_name", name, "error", err)
+		} else {
+			el.logger.Info("Module stopped successfully", "module_name", name)
 		}
 	}
 	el.modulesLock.Unlock()
 
+	// 等待所有 goroutine 完成
+	el.logger.Info("Waiting for event loop goroutines to complete...")
 	el.wg.Wait()
-	el.running = false
+	el.logger.Info("All event loop goroutines completed")
 
-	el.logger.Info("Event loop stopped")
+	el.running = false
+	el.logger.Info("Event loop stopped successfully")
 	return nil
 }
 
@@ -112,13 +125,16 @@ func (el *EventLoop) UnregisterModule(name string) error {
 
 func (el *EventLoop) run() {
 	defer el.wg.Done()
+	defer el.logger.Info("Event loop run() completed")
 
+	el.logger.Info("Event loop run() started")
 	ticker := time.NewTicker(el.interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-el.ctx.Done():
+			el.logger.Info("Event loop received context cancellation, exiting...")
 			return
 		case <-ticker.C:
 			el.processCycle()
