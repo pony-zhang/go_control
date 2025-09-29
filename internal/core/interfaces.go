@@ -43,10 +43,9 @@ type IPCClient interface {
 }
 
 type Module interface {
-	Name() string
+	EventHandler
 	Start(ctx context.Context) error
 	Stop() error
-	Process() error
 	Status() interface{}
 }
 

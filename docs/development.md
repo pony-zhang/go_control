@@ -124,13 +124,24 @@ go tool cover -html=coverage.out -o coverage.html
 
 ```go
 type Module interface {
-    Name() string                    // 模块名称
+    EventHandler                    // 事件处理器接口
     Start(ctx context.Context) error // 启动模块
     Stop() error                     // 停止模块
-    Process() error                  // 处理逻辑
     Status() interface{}             // 状态信息
 }
+
+type EventHandler interface {
+    HandleEvent(event Event) error    // 处理事件
+    GetSubscribedEvents() []EventType // 获取订阅的事件类型
+    Name() string                     // 处理器名称
+}
 ```
+
+**事件驱动架构说明**：
+- 模块不再使用定时轮询的 `Process()` 方法
+- 改为事件驱动的 `HandleEvent()` 方法
+- 模块通过 `GetSubscribedEvents()` 声明感兴趣的事件类型
+- EventLoop根据事件类型自动分发到相应的处理器
 
 ### 3. 设备接口
 
@@ -1541,6 +1552,188 @@ A: 定期进行依赖分析，确保没有循环依赖，层间通信通过标�
 ### Q: 如何进行分层调试？
 A: 使用分层日志系统，配置不同层级的日志级别，使用分层调试工具跟踪执行流程，利用分层状态监控接口。
 
-这个开发指南已更新以反映新的HAL和水平层架构，提供了完整的分层开发指导、测试策略和运维配置。
+## 事件循环使用示例
 
-这个开发指南提供了完整的技术文档，帮助开发者理解系统架构、开发新功能、调试问题和部署系统。
+### 1. 基本事件循环使用
+
+```go
+// 创建事件循环（100ms定时器间隔）
+eventLoop := NewEventLoop(100 * time.Millisecond)
+
+// 启动事件循环
+ctx := context.Background()
+if err := eventLoop.Start(ctx); err != nil {
+    log.Fatalf("Failed to start event loop: %v", err)
+}
+
+// 发送各种类型的事件
+eventLoop.EmitEvent(NewSystemEvent(EventTypeSystemStart, "system", nil))
+eventLoop.EmitEvent(NewTaskEvent(EventTypeTaskRequest, "scheduler", "task-001", "move", task, nil))
+eventLoop.EmitEvent(NewDeviceEvent(EventTypeDeviceConnect, "hal", "motor-1", status, nil, data))
+
+// 停止事件循环
+if err := eventLoop.Stop(); err != nil {
+    log.Fatalf("Failed to stop event loop: %v", err)
+}
+```
+
+### 2. 自定义事件处理器
+
+```go
+// 自定义事件处理器
+type CustomEventHandler struct {
+    name string
+}
+
+func (h *CustomEventHandler) Name() string {
+    return h.name
+}
+
+func (h *CustomEventHandler) HandleEvent(event Event) error {
+    switch event.Type() {
+    case EventTypeSystemStart:
+        fmt.Printf("System started: %s\n", event.Source())
+    case EventTypeTaskComplete:
+        if taskEvent, ok := event.(*TaskEvent); ok {
+            fmt.Printf("Task completed: %s\n", taskEvent.TaskID)
+        }
+    case EventTypeTimerTick:
+        // 处理定时任务
+        h.processTimedTasks()
+    }
+    return nil
+}
+
+func (h *CustomEventHandler) GetSubscribedEvents() []EventType {
+    return []EventType{
+        EventTypeSystemStart,
+        EventTypeTaskComplete,
+        EventTypeTimerTick,
+    }
+}
+
+// 注册事件处理器
+handler := &CustomEventHandler{name: "custom_handler"}
+eventLoop.RegisterHandler(EventTypeSystemStart, handler)
+eventLoop.RegisterHandler(EventTypeTaskComplete, handler)
+eventLoop.RegisterHandler(EventTypeTimerTick, handler)
+```
+
+### 3. 模块集成事件循环
+
+```go
+// 自定义模块
+type CustomModule struct {
+    name string
+}
+
+func (m *CustomModule) Name() string {
+    return m.name
+}
+
+func (m *CustomModule) Start(ctx context.Context) error {
+    fmt.Printf("Module %s started\n", m.name)
+    return nil
+}
+
+func (m *CustomModule) Stop() error {
+    fmt.Printf("Module %s stopped\n", m.name)
+    return nil
+}
+
+func (m *CustomModule) HandleEvent(event Event) error {
+    switch event.Type() {
+    case EventTypeSystemStart:
+        // 系统启动时的初始化工作
+        m.initialize()
+    case EventTypeSystemStop:
+        // 系统停止时的清理工作
+        m.cleanup()
+    case EventTypeTimerTick:
+        // 定时任务
+        m.periodicTask()
+    }
+    return nil
+}
+
+func (m *CustomModule) GetSubscribedEvents() []EventType {
+    return []EventType{
+        EventTypeSystemStart,
+        EventTypeSystemStop,
+        EventTypeTimerTick,
+    }
+}
+
+func (m *CustomModule) Status() interface{} {
+    return map[string]interface{}{
+        "name":    m.name,
+        "running": true,
+    }
+}
+
+// 注册模块（自动注册事件处理器）
+module := &CustomModule{name: "custom_module"}
+if err := eventLoop.RegisterModule("custom_module", module); err != nil {
+    log.Fatalf("Failed to register module: %v", err)
+}
+```
+
+### 4. 事件类型和创建
+
+```go
+// 创建系统事件
+systemEvent := NewSystemEvent(EventTypeSystemStart, "main", nil)
+
+// 创建任务事件
+taskEvent := NewTaskEvent(
+    EventTypeTaskRequest,
+    "trigger",
+    "task-001",
+    "move",
+    &types.Task{ID: "task-001", Type: "move"},
+    nil,
+)
+
+// 创建设备事件
+deviceEvent := NewDeviceEvent(
+    EventTypeDeviceConnect,
+    "hal",
+    "motor-1",
+    map[string]interface{}{"connected": true},
+    nil,
+    map[string]interface{}{"position": 0},
+)
+
+// 创建网络事件
+networkEvent := NewNetworkEvent(
+    EventTypeNetworkMessage,
+    "ipc",
+    "client-001",
+    "hello world",
+    nil,
+)
+
+// 发送事件
+eventLoop.EmitEvent(systemEvent)
+eventLoop.EmitEvent(taskEvent)
+eventLoop.EmitEvent(deviceEvent)
+eventLoop.EmitEvent(networkEvent)
+```
+
+### 5. 事件循环性能监控
+
+```go
+// 获取模块状态
+status := eventLoop.GetModuleStatus()
+for moduleName, moduleStatus := range status {
+    fmt.Printf("Module %s: %+v\n", moduleName, moduleStatus)
+}
+
+// 获取事件处理器统计
+handlers := eventLoop.GetHandlers()
+for eventType, count := range handlers {
+    fmt.Printf("Event type %s: %d handlers\n", eventType, count)
+}
+```
+
+这个开发指南已更新以反映新的HAL和水平层架构，提供了完整的分层开发指导、测试策略和运维配置。

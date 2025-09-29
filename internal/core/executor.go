@@ -86,8 +86,41 @@ func (ce *CommandExecutor) Name() string {
 	return "command_executor"
 }
 
-func (ce *CommandExecutor) Process() error {
-	return nil
+// HandleEvent 实现EventHandler接口
+func (ce *CommandExecutor) HandleEvent(event Event) error {
+	switch event.Type() {
+	case EventTypeSystemStart:
+		ce.logger.Info("Command executor received system start event")
+		ce.startCommandProcessing()
+		return nil
+	case EventTypeSystemStop:
+		ce.logger.Info("Command executor received system stop event")
+		ce.stopCommandProcessing()
+		return nil
+	case EventTypeTaskComplete:
+		if taskEvent, ok := event.(*TaskEvent); ok {
+			ce.logger.Info("Command executor received task complete event", "task_id", taskEvent.TaskID)
+			// 可以在这里执行任务完成后的清理工作
+		}
+		return nil
+	case EventTypeTimerTick:
+		// 处理定时器事件，检查命令队列
+		ce.processCommandQueue()
+		return nil
+	default:
+		ce.logger.Debug("Command executor ignoring event", "event_type", event.Type())
+		return nil
+	}
+}
+
+// GetSubscribedEvents 返回订阅的事件类型
+func (ce *CommandExecutor) GetSubscribedEvents() []EventType {
+	return []EventType{
+		EventTypeSystemStart,
+		EventTypeSystemStop,
+		EventTypeTaskComplete,
+		EventTypeTimerTick,
+	}
 }
 
 func (ce *CommandExecutor) Status() interface{} {
@@ -99,6 +132,34 @@ func (ce *CommandExecutor) Status() interface{} {
 	}
 
 	return status
+}
+
+// startCommandProcessing 启动命令处理
+func (ce *CommandExecutor) startCommandProcessing() {
+	if !ce.running {
+		ce.logger.Info("Starting command processing")
+		ce.wg.Add(1)
+		go ce.executeCommands()
+	}
+}
+
+// stopCommandProcessing 停止命令处理
+func (ce *CommandExecutor) stopCommandProcessing() {
+	if ce.running {
+		ce.logger.Info("Stopping command processing")
+		ce.cancel()
+		ce.wg.Wait()
+	}
+}
+
+// processCommandQueue 处理命令队列
+func (ce *CommandExecutor) processCommandQueue() {
+	if !ce.running {
+		return
+	}
+
+	// 这里可以添加队列处理逻辑
+	// 例如：检查队列状态，处理超时等
 }
 
 func (ce *CommandExecutor) AddDevice(device Device) error {

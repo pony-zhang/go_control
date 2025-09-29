@@ -217,8 +217,32 @@ func (tt *TaskTrigger) Name() string {
 	return "task_trigger"
 }
 
-func (tt *TaskTrigger) Process() error {
-	return nil
+// HandleEvent 实现EventHandler接口
+func (tt *TaskTrigger) HandleEvent(event Event) error {
+	switch event.Type() {
+	case EventTypeSystemStart:
+		tt.logger.Info("Task trigger received system start event")
+		return nil
+	case EventTypeSystemStop:
+		tt.logger.Info("Task trigger received system stop event")
+		return nil
+	case EventTypeTimerTick:
+		// 处理定时器事件，检查并触发任务
+		tt.checkAndTriggerTriggers()
+		return nil
+	default:
+		tt.logger.Debug("Task trigger ignoring event", "event_type", event.Type())
+		return nil
+	}
+}
+
+// GetSubscribedEvents 返回订阅的事件类型
+func (tt *TaskTrigger) GetSubscribedEvents() []EventType {
+	return []EventType{
+		EventTypeSystemStart,
+		EventTypeSystemStop,
+		EventTypeTimerTick,
+	}
 }
 
 func (tt *TaskTrigger) Status() interface{} {
@@ -237,4 +261,42 @@ func (tt *TaskTrigger) GetTriggerStatus() map[string]interface{} {
 		}
 	}
 	return status
+}
+
+// checkAndTriggerTriggers 检查并触发任务
+func (tt *TaskTrigger) checkAndTriggerTriggers() {
+	tt.triggersLock.RLock()
+	defer tt.triggersLock.RUnlock()
+
+	for name, trigger := range tt.triggers {
+		if !trigger.Enabled {
+			continue
+		}
+
+		// 这里可以添加触发条件检查逻辑
+		// 例如：时间条件、设备状态条件等
+		if tt.shouldTrigger(trigger) {
+			task := trigger.Trigger()
+			if task != nil {
+				select {
+				case tt.taskChan <- task:
+					trigger.LastTrigger = time.Now()
+					tt.logger.Info("Task triggered", "trigger_name", name, "task_id", task.ID)
+				default:
+					tt.logger.Warn("Task channel full, dropping task", "trigger_name", name)
+				}
+			}
+		}
+	}
+}
+
+// shouldTrigger 检查是否应该触发
+func (tt *TaskTrigger) shouldTrigger(trigger *TriggerSource) bool {
+	// 简单的触发条件检查
+	// 可以根据实际需求扩展更复杂的逻辑
+	if time.Since(trigger.LastTrigger) < time.Second {
+		return false // 防止过于频繁的触发
+	}
+
+	return true
 }

@@ -188,17 +188,28 @@ func (hal *HAL) GetDeviceStatus(deviceID types.DeviceID) (types.DeviceStatus, er
 
 **位置**: `internal/core/eventloop.go`
 
-**职责**: 系统中央协调器，负责驱动所有模块的周期性处理
+**职责**: 系统中央事件协调器，负责处理各种事件并分发到相应的处理器
 
 **关键特性**:
-- 可配置的处理间隔 (默认10ms)
-- 模块生命周期管理
+- 真正的事件驱动架构（非定时轮询）
+- 统一事件队列处理
+- 异步事件处理，避免阻塞
+- 支持多种事件类型（系统、任务、设备、网络、配置、定时器）
+- 高性能单channel设计
 - 基于Context的取消机制
-- 模块状态监控
+
+**事件类型**:
+- **System Events**: 系统生命周期（启动、停止、错误）
+- **Task Events**: 任务管理（请求、完成、错误、取消）
+- **Device Events**: 设备状态（连接、断开、错误、状态更新）
+- **Network Events**: 网络通信（连接、断开、消息、错误）
+- **Config Events**: 配置管理（重载、变更）
+- **Timer Events**: 定时任务（可配置间隔）
+- **Custom Events**: 用户自定义事件
 
 **数据流**:
 ```
-Ticker → EventLoop.processCycle() → module.Process() for each registered module
+Event Sources → EventLoop.EmitEvent() → EventQueue → EventHandler.HandleEvent()
 ```
 
 ### 2. 任务触发器 (Task Trigger)
@@ -215,7 +226,7 @@ Ticker → EventLoop.processCycle() → module.Process() for each registered mod
 
 **数据流**:
 ```
-Trigger Sources → TaskTrigger.checkTriggers() → Validate → taskChan → Scheduler
+Trigger Sources → TaskTrigger.HandleEvent() → Validate → Emit Task Event → TaskScheduler.HandleEvent()
 ```
 
 ### 3. 任务调度器 (Task Scheduler)
@@ -446,11 +457,16 @@ type ApplicationManager struct {
 
 ```go
 type Module interface {
-    Name() string
+    EventHandler
     Start(ctx context.Context) error
     Stop() error
-    Process() error
     Status() interface{}
+}
+
+type EventHandler interface {
+    HandleEvent(event Event) error
+    GetSubscribedEvents() []EventType
+    Name() string
 }
 
 type Device interface {
