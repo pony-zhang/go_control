@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"control/internal/core"
 	"control/internal/hal"
 	"control/internal/application"
 	"control/internal/ipc"
@@ -16,18 +15,11 @@ import (
 type ApplicationManager struct {
 	infrastructure *InfrastructureManager
 
-	// 新的水平分层架构
+	// 水平分层架构
 	hal                *hal.HardwareAbstractionLayer
 	serviceCoordination *application.ServiceCoordinationLayer
 	taskOrchestration  *application.TaskOrchestrationLayer
 	businessLogic      *application.BusinessLogicLayer
-
-	// 保留原有的组件引用用于向后兼容
-	taskDecomposer    *core.TaskNodeDecomposer
-	commandExecutor   *core.CommandExecutor
-	commandMappingMgr *core.CommandMappingManager
-	taskScheduler     *core.TaskScheduler
-	taskTrigger       *core.TaskTrigger
 
 	logger *logging.Logger
 	ctx    context.Context
@@ -52,41 +44,12 @@ func NewApplicationManager(infrastructure *InfrastructureManager, systemConfig t
 	// 4. 创建业务逻辑层 - 处理高级业务规则、安全性和抽象操作
 	am.businessLogic = application.NewBusinessLogicLayer(am.taskOrchestration)
 
-	// 5. 保留原有组件引用用于向后兼容
-	am.taskDecomposer = am.taskOrchestration.GetTaskDecomposer()
-	am.commandExecutor = am.serviceCoordination.GetCommandExecutor()
-	am.commandMappingMgr = am.taskOrchestration.GetCommandMappingManager()
-	am.taskScheduler = am.taskOrchestration.GetTaskScheduler()
-	am.taskTrigger = am.taskOrchestration.GetTaskTrigger()
+	// 水平分层架构创建完成
 
 	am.logger.Info("ApplicationManager created with complete horizontal layer architecture")
 	return am, nil
 }
 
-// GetTaskDecomposer 获取任务分解器
-func (am *ApplicationManager) GetTaskDecomposer() *core.TaskNodeDecomposer {
-	return am.taskDecomposer
-}
-
-// GetCommandExecutor 获取命令执行器
-func (am *ApplicationManager) GetCommandExecutor() *core.CommandExecutor {
-	return am.commandExecutor
-}
-
-// GetCommandMappingManager 获取命令映射管理器
-func (am *ApplicationManager) GetCommandMappingManager() *core.CommandMappingManager {
-	return am.commandMappingMgr
-}
-
-// GetTaskScheduler 获取任务调度器
-func (am *ApplicationManager) GetTaskScheduler() *core.TaskScheduler {
-	return am.taskScheduler
-}
-
-// GetTaskTrigger 获取任务触发器
-func (am *ApplicationManager) GetTaskTrigger() *core.TaskTrigger {
-	return am.taskTrigger
-}
 
 // SetupDependencies 设置组件间依赖关系，现在包括新的水平分层架构
 func (am *ApplicationManager) SetupDependencies() error {
@@ -107,6 +70,9 @@ func (am *ApplicationManager) SetupDependencies() error {
 	if err := am.setupLayerDependencies(); err != nil {
 		return fmt.Errorf("failed to setup layer dependencies: %w", err)
 	}
+
+	// 4. 设置任务处理通道
+	am.setupTaskChannels()
 
 	am.logger.Info("Application layer dependencies setup completed with horizontal architecture")
 	return nil
@@ -213,18 +179,18 @@ func (am *ApplicationManager) registerIPCHandlers(ipcServer *ipc.IPCServer) {
 func (am *ApplicationManager) setupTaskChannels() {
 	am.logger.Info("Setting up task processing channels")
 
-	// 任务触发器 -> 任务调度器
-	taskChan := am.taskTrigger.GetTaskChannel()
+	// 通过任务编排层获取任务通道
+	taskChan := am.taskOrchestration.GetTaskTrigger().GetTaskChannel()
 	go func() {
 		for task := range taskChan {
-			if err := am.taskScheduler.ScheduleTask(task); err != nil {
+			if err := am.taskOrchestration.GetTaskScheduler().ScheduleTask(task); err != nil {
 				am.logger.Error("Failed to schedule task", "task_id", task.ID, "error", err)
 			}
 		}
 	}()
 
 	// 任务调度器 -> 任务处理
-	scheduledTaskChan := am.taskScheduler.GetTaskChannel()
+	scheduledTaskChan := am.taskOrchestration.GetTaskScheduler().GetTaskChannel()
 	go func() {
 		for task := range scheduledTaskChan {
 			go am.processTask(task)
@@ -234,14 +200,14 @@ func (am *ApplicationManager) setupTaskChannels() {
 
 // processTask 处理任务 (内部方法)
 func (am *ApplicationManager) processTask(task *types.Task) {
-	commands, err := am.taskDecomposer.DecomposeTask(task)
+	commands, err := am.taskOrchestration.GetTaskDecomposer().DecomposeTask(task)
 	if err != nil {
 		am.logger.Error("Failed to decompose task", "task_id", task.ID, "error", err)
 		return
 	}
 
 	for _, cmd := range commands {
-		if err := am.commandExecutor.ExecuteCommand(am.ctx, cmd); err != nil {
+		if err := am.serviceCoordination.GetCommandExecutor().ExecuteCommand(am.ctx, cmd); err != nil {
 			am.logger.Error("Failed to execute command", "command_id", cmd.ID, "error", err)
 		}
 	}
@@ -325,8 +291,14 @@ func (am *ApplicationManager) handleConfigUpdate(message types.IPCMessage) {
 
 // parseAbstractCommand 解析IPC消息中的抽象命令
 func (am *ApplicationManager) parseAbstractCommand(message types.IPCMessage) (types.AbstractCommand, map[string]interface{}) {
-	// 这里需要根据实际的IPC消息格式解析抽象命令
-	// 目前返回默认值
+	// 根据simulator发送的IPC消息格式解析抽象命令
+	if command, ok := message.Data["command"].(string); ok {
+		if params, ok := message.Data["parameters"].(map[string]interface{}); ok {
+			return types.AbstractCommand(command), params
+		} else {
+			return types.AbstractCommand(command), make(map[string]interface{})
+		}
+	}
 	return "", make(map[string]interface{})
 }
 

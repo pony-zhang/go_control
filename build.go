@@ -21,9 +21,9 @@ func main() {
 
 	// 要构建的模块
 	modules := []struct {
-		name    string
-		path    string
-		output  string
+		name   string
+		path   string
+		output string
 	}{
 		{"control", "./cmd/control", "control"},
 		{"simulator", "./cmd/simulator", "simulator"},

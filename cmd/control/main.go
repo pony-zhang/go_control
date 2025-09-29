@@ -173,16 +173,16 @@ func (mcs *MotionControlSystem) Stop() error {
 }
 
 func (mcs *MotionControlSystem) setupEventHandlers() error {
-	// 注册应用层模块到事件循环
-	if err := mcs.eventLoop.RegisterModule("task_trigger", mcs.application.GetTaskTrigger()); err != nil {
+	// 通过水平分层架构注册应用层模块到事件循环
+	if err := mcs.eventLoop.RegisterModule("task_trigger", mcs.application.GetTaskOrchestrationLayer().GetTaskTrigger()); err != nil {
 		return fmt.Errorf("failed to register task trigger: %w", err)
 	}
 
-	if err := mcs.eventLoop.RegisterModule("task_scheduler", mcs.application.GetTaskScheduler()); err != nil {
+	if err := mcs.eventLoop.RegisterModule("task_scheduler", mcs.application.GetTaskOrchestrationLayer().GetTaskScheduler()); err != nil {
 		return fmt.Errorf("failed to register task scheduler: %w", err)
 	}
 
-	if err := mcs.eventLoop.RegisterModule("command_executor", mcs.application.GetCommandExecutor()); err != nil {
+	if err := mcs.eventLoop.RegisterModule("command_executor", mcs.application.GetServiceCoordinationLayer().GetCommandExecutor()); err != nil {
 		return fmt.Errorf("failed to register command executor: %w", err)
 	}
 
