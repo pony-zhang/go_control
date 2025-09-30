@@ -2,7 +2,7 @@
 
 ## 概述
 
-运动控制系统是一个基于Go语言的工业自动化运动控制核心系统，采用分层、事件驱动的架构设计。系统通过模块化组件实现任务调度、设备管理、进程间通信等核心功能，为工业机器人和自动化设备提供可靠的运动控制解决方案。
+运动控制系统是一个基于Go语言的工业自动化运动控制核心系统，采用分层、事件驱动的架构设计。系统通过模块化组件实现任务调度、设备管理、进程间通信等核心功能，并通过命令路由器和订阅分发机制实现了事件驱动的命令处理架构，为工业机器人和自动化设备提供可靠的运动控制解决方案。
 
 ## 系统架构图
 
@@ -11,7 +11,7 @@
 │                        External Clients                         │
 │                      (GUI, API, 其他系统)                        │
 └─────────────────────────┬───────────────────────────────────────┘
-                          │ TCP/IP
+                          │ TCP/IP (Business Commands)
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Coordination Layer                          │
@@ -29,15 +29,20 @@
 │    │  (配置管理器)   │  (设备管理器)   │     (IPC服务器)         │ │
 │    └─────────────────┴─────────────────┴─────────────────────────┘ │
 └─────────────────────────┬───────────────────────────────────────┘
-                          │ Layer Communication
+                          │ Layer Communication & Event-Driven Commands
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Application Layer                            │
 │    ┌─────────────────────────────────────────────────────────┐   │
 │    │               Business Logic Layer                      │   │
-│    │          (业务逻辑层 - 高级业务规则)                    │   │
+│    │     (业务逻辑层 - 事件驱动命令处理)                      │   │
 │    └─────────────────────────────────────────────────────────┘   │
-│                              │                                │
+│              │           │            │                       │
+│    ┌─────────────────┐ │ ┌─────────────────┐                 │
+│    │ CommandRouter   │ │ │  ConfigHandler │                 │
+│    │  (命令路由器)    │ │ │ (配置处理器)   │                 │
+│    └─────────────────┘ │ └─────────────────┘                 │
+│              │           │            │                       │
 │    ┌─────────────────────────────────────────────────────────┐   │
 │    │            Task Orchestration Layer                    │   │
 │    │         (任务编排层 - 任务调度和流程控制)                │   │
@@ -102,21 +107,36 @@
 
 **位置**: `internal/application/business_logic.go`
 
-**职责**: 高级业务规则、安全管理和抽象命令处理
+**职责**: 高级业务规则、安全管理和事件驱动命令处理
 
 **关键特性**:
-- 抽象命令到具体任务的映射
-- 业务规则验证和约束检查
-- 安全检查和紧急处理
-- 系统状态监控和报告
+- **CommandHandler接口实现**: 订阅和处理特定的业务命令
+- **事件驱动架构**: 通过CommandRouter接收和处理命令
+- **业务规则验证和约束检查**: 确保操作安全性
+- **安全检查和紧急处理**: 集成安全机制
+- **系统状态监控和报告**: 提供系统健康状态
 
 **核心方法**:
 ```go
-func (bll *BusinessLogicLayer) ExecuteAbstractCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) (*types.Task, error)
+// CommandHandler接口实现
+func (bll *BusinessLogicLayer) GetHandledCommands() []types.BusinessCommand
+func (bll *BusinessLogicLayer) HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse
+func (bll *BusinessLogicLayer) GetName() string
+
+// 业务操作方法
+func (bll *BusinessLogicLayer) ExecuteBusinessCommand(command types.BusinessCommand, params map[string]interface{}) (*types.Task, error)
 func (bll *BusinessLogicLayer) EmergencyStop() error
 func (bll *BusinessLogicLayer) SelfCheck() error
 func (bll *BusinessLogicLayer) GetSystemStatus() (map[string]interface{}, error)
 ```
+
+**支持的命令类型**:
+- `CmdQueryStatus`: 系统状态查询
+- `CmdSelfCheck`: 系统自检
+- `CmdEmergencyStop`: 紧急停止
+- `CmdHome`: 系统回零
+- `CmdInitialize`: 系统初始化
+- `CmdSafetyCheck`: 安全检查
 
 #### 2. 任务编排层 (Task Orchestration Layer)
 
@@ -125,16 +145,17 @@ func (bll *BusinessLogicLayer) GetSystemStatus() (map[string]interface{}, error)
 **职责**: 任务调度、分解和流程控制
 
 **关键特性**:
-- 任务调度和优先级管理
-- 任务分解为可执行命令
-- 命令映射和转换
-- 任务生命周期管理
+- **任务调度和优先级管理**: 基于优先级的任务队列管理
+- **任务分解为可执行命令**: 将高级任务转换为设备可执行命令
+- **命令映射和转换**: 业务命令到具体操作的转换
+- **任务生命周期管理**: 任务状态跟踪和控制
 
 **核心方法**:
 ```go
 func (tol *TaskOrchestrationLayer) ScheduleTask(task *types.Task) error
-func (tol *TaskOrchestrationLayer) ExecuteAbstractCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) (*types.Task, error)
 func (tol *TaskOrchestrationLayer) GetTaskScheduler() *core.TaskScheduler
+func (tol *TaskOrchestrationLayer) GetTaskTrigger() *core.TaskTrigger
+func (tol *TaskOrchestrationLayer) GetTaskDecomposer() *core.TaskDecomposer
 ```
 
 #### 3. 服务协调层 (Service Coordination Layer)
@@ -182,9 +203,59 @@ func (hal *HAL) AllocateResource(resourceType string, resourceID string) error
 func (hal *HAL) GetDeviceStatus(deviceID types.DeviceID) (types.DeviceStatus, error)
 ```
 
+## 事件驱动命令处理系统
+
+### 1. 命令路由器 (Command Router)
+
+**位置**: `internal/core/command_handler.go`
+
+**职责**: 智能路由业务命令到相应的处理器，实现事件驱动架构
+
+**关键特性**:
+- **CommandHandler接口管理**: 维护命令到处理器的映射关系
+- **动态路由**: 根据命令类型自动路由到相应的处理器
+- **处理器注册**: 支持运行时注册新的命令处理器
+- **冲突检测**: 检测和处理命令处理器冲突
+
+**核心接口**:
+```go
+type CommandHandler interface {
+    GetHandledCommands() []types.BusinessCommand
+    HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse
+    GetName() string
+}
+
+type CommandRouter struct {
+    handlers map[types.BusinessCommand]CommandHandler
+    logger   *logging.Logger
+}
+```
+
+**工作流程**:
+```
+业务命令 → CommandRouter.RouteCommand() → 查找处理器 → HandleCommand() → 业务响应
+```
+
+### 2. 配置处理器 (Config Handler)
+
+**位置**: `internal/management/config_handler.go`
+
+**职责**: 处理配置相关的业务命令，实现CommandHandler接口
+
+**关键特性**:
+- **配置查询**: 获取系统配置信息
+- **配置更新**: 动态更新系统配置
+- **模板管理**: 管理配置模板
+- **热重载支持**: 支持配置热重载
+
+**支持的命令**:
+- `CmdGetConfig`: 获取配置
+- `CmdSetConfig`: 设置配置
+- `CmdListTemplates`: 列出模板
+
 ## 核心组件
 
-### 1. 事件循环 (Event Loop)
+### 3. 事件循环 (Event Loop)
 
 **位置**: `internal/core/eventloop.go`
 
@@ -338,30 +409,39 @@ device.Write() → Queue.completion
 - 广播和单播通信
 
 **支持的消息类型**:
-- `task_request`: 任务请求
-- `task_template_request`: 任务模板请求
-- `abstract_command_request`: 抽象命令请求
-- `status_request`: 状态查询
+- `business_command`: 业务命令 (新架构 - 主要接口)
+- `business_response`: 业务响应
 - `config_update`: 配置更新
+
+**业务命令类型**:
+- `query`: 系统状态查询
+- `move`: 运动控制
+- `home`: 系统回零
+- `stop`: 紧急停止
+- `self_check`: 系统自检
+- `initialize`: 系统初始化
+- `safety_check`: 安全检查
 
 ## 数据流分析
 
-### 1. 任务执行完整流程 (新架构)
+### 1. 事件驱动命令处理流程 (新架构)
 
 ```
-外部请求 → IPC服务器 → 业务逻辑层 → 任务编排层 → 服务协调层 →
-硬件抽象层 → 物理设备 → 物理执行
+外部客户端 → IPC服务器 → ApplicationManager → CommandRouter → CommandHandlers → 各层处理
 ```
 
 **详细步骤**:
 
-1. **请求接收**: IPC服务器接收外部客户端的TCP连接
-2. **抽象命令处理**: 业务逻辑层处理高级抽象命令和业务规则验证
-3. **任务调度**: 任务编排层进行优先级调度和任务分解
-4. **服务协调**: 服务协调层管理硬件资源分配和命令执行
-5. **硬件抽象**: HAL通过统一接口与多种硬件协议通信
-6. **物理执行**: 硬件设备执行具体命令
-7. **状态反馈**: 执行结果逐层返回给业务逻辑层
+1. **客户端连接**: IPC服务器接收外部客户端的TCP连接
+2. **消息接收和路由**: IPC服务器接收业务命令并路由到ApplicationManager
+3. **业务消息处理**: ApplicationManager解析业务消息并通过CommandRouter智能路由
+4. **命令处理器执行**: CommandRouter根据命令类型路由到相应的CommandHandler
+5. **业务逻辑处理**: BusinessLogicLayer处理高级业务规则和验证
+6. **任务调度**: 任务编排层进行优先级调度和任务分解
+7. **服务协调**: 服务协调层管理硬件资源分配和命令执行
+8. **硬件抽象**: HAL通过统一接口与多种硬件协议通信
+9. **物理执行**: 硬件设备执行具体命令
+10. **响应返回**: 执行结果逐层返回给客户端
 
 ### 2. 水平分层间数据流
 
@@ -377,7 +457,24 @@ device.Write() → Queue.completion
 物理设备 (实际执行, 状态反馈)
 ```
 
-### 3. 事件循环协调机制 (新架构)
+### 3. 事件驱动命令路由机制 (新架构)
+
+```
+业务命令 → CommandRouter → Handler.Lookup → CommandHandler.HandleCommand() → BusinessResponse
+```
+
+**详细流程**:
+
+1. **命令接收**: ApplicationManager接收业务命令消息
+2. **智能路由**: CommandRouter根据命令类型查找相应的处理器
+3. **处理器执行**: CommandHandler处理具体的业务逻辑
+4. **响应生成**: 生成标准的BusinessResponse并返回
+
+**支持的CommandHandler**:
+- **BusinessLogicLayer**: 处理运动控制、系统管理等业务命令
+- **ConfigHandler**: 处理配置查询、更新等配置相关命令
+
+### 4. 事件循环协调机制 (新架构)
 
 ```
 事件循环定时器 → 管理层协调:
@@ -451,7 +548,50 @@ type ApplicationManager struct {
 }
 ```
 
-### 5. 接口驱动架构
+### 5. 事件驱动命令处理模式 (Event-Driven Command Processing)
+
+系统采用事件驱动的命令处理架构，模块通过订阅机制处理命令:
+
+```go
+// CommandHandler接口 - 事件驱动的命令处理
+type CommandHandler interface {
+    GetHandledCommands() []types.BusinessCommand
+    HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse
+    GetName() string
+}
+
+// CommandRouter - 智能命令路由
+type CommandRouter struct {
+    handlers map[types.BusinessCommand]CommandHandler
+    logger   *logging.Logger
+}
+
+// 业务消息和响应结构
+type BusinessMessage struct {
+    Command   BusinessCommand         // 业务命令类型
+    Source    string                 // 消息源
+    Target    string                 // 目标地址
+    RequestID string                 // 请求ID
+    Params    map[string]interface{} // 命令参数
+    Timestamp time.Time               // 时间戳
+}
+
+type BusinessResponse struct {
+    RequestID string                 // 请求ID
+    Status    string                 // 响应状态
+    Data      map[string]interface{} // 响应数据
+    Error     string                 // 错误信息
+    Timestamp time.Time               // 时间戳
+}
+```
+
+**工作原理**:
+- **订阅机制**: CommandHandler声明可处理的命令类型
+- **动态路由**: CommandRouter根据命令类型自动路由
+- **模块化处理**: 每个处理器独立处理特定类型的命令
+- **标准化响应**: 统一的响应格式和错误处理
+
+### 6. 接口驱动架构
 
 所有核心组件都基于标准化接口实现:
 
@@ -654,18 +794,20 @@ devices:
 
 ## 总结
 
-该运动控制系统通过先进的分层架构设计，实现了工业级运动控制的高可靠性、可扩展性和可维护性：
+该运动控制系统通过先进的分层架构设计和事件驱动命令处理机制，实现了工业级运动控制的高可靠性、可扩展性和可维护性：
 
 **架构创新**:
 - **四层主架构**: 协调层、基础设施层、应用层、物理层
 - **水平子层**: 应用层内四个专业化水平子层
+- **事件驱动命令处理**: CommandRouter和CommandHandler接口实现的模块化命令处理
 - **硬件抽象**: 统一的硬件接口支持多协议设备
 - **资源管理**: 动态分配和监控硬件资源
 
 **技术优势**:
+- **事件驱动架构**: 模块化命令处理，易于扩展和维护
 - **安全优先**: 多层安全机制和紧急处理流程
 - **高性能**: 并发处理和资源优化
-- **易扩展**: 模块化设计和标准化接口
+- **易扩展**: 通过CommandHandler接口轻松添加新的命令处理器
 - **易维护**: 清晰的职责分离和统一管理
 
 **工业应用**:
@@ -674,4 +816,10 @@ devices:
 - 提供完整的监控和诊断能力
 - 满足工业级可靠性要求
 
-这种先进的架构设计确保了系统在高负载、高可靠性要求下的稳定运行，为现代工业自动化应用提供了坚实的技术基础。通过HAL和水平分层的引入，系统在保持向后兼容的同时，具备了更强的扩展能力和更好的维护性。
+**架构演进**:
+- **简化前端接口**: 前端只发送业务命令，后端负责路由和处理
+- **模块化处理**: 每个模块专注于特定类型的命令处理
+- **标准化接口**: 统一的CommandHandler接口和BusinessMessage格式
+- **智能路由**: CommandRouter实现命令的自动路由和分发
+
+这种先进的架构设计确保了系统在高负载、高可靠性要求下的稳定运行，为现代工业自动化应用提供了坚实的技术基础。通过事件驱动架构和HAL的引入，系统具备了更强的扩展能力、更好的维护性和更高的开发效率。

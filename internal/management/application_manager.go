@@ -3,7 +3,9 @@ package management
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"control/internal/core"
 	"control/internal/hal"
 	"control/internal/application"
 	"control/internal/ipc"
@@ -20,6 +22,10 @@ type ApplicationManager struct {
 	serviceCoordination *application.ServiceCoordinationLayer
 	taskOrchestration  *application.TaskOrchestrationLayer
 	businessLogic      *application.BusinessLogicLayer
+
+	// 命令路由系统
+	commandRouter      *core.CommandRouter
+	configHandler      *ConfigHandler
 
 	logger *logging.Logger
 	ctx    context.Context
@@ -44,9 +50,16 @@ func NewApplicationManager(infrastructure *InfrastructureManager, systemConfig t
 	// 4. 创建业务逻辑层 - 处理高级业务规则、安全性和抽象操作
 	am.businessLogic = application.NewBusinessLogicLayer(am.taskOrchestration)
 
-	// 水平分层架构创建完成
+	// 5. 创建命令路由系统
+	am.commandRouter = core.NewCommandRouter(am.logger)
 
-	am.logger.Info("ApplicationManager created with complete horizontal layer architecture")
+	// 6. 创建配置处理器
+	configManager := am.infrastructure.GetConfigManager()
+	am.configHandler = NewConfigHandler(configManager, am.logger)
+
+	// 水平分层架构和命令路由系统创建完成
+
+	am.logger.Info("ApplicationManager created with complete horizontal layer architecture and command routing")
 	return am, nil
 }
 
@@ -74,7 +87,10 @@ func (am *ApplicationManager) SetupDependencies() error {
 	// 4. 设置任务处理通道
 	am.setupTaskChannels()
 
-	am.logger.Info("Application layer dependencies setup completed with horizontal architecture")
+	// 5. 注册命令处理器
+	am.setupCommandHandlers()
+
+	am.logger.Info("Application layer dependencies setup completed with horizontal architecture and command routing")
 	return nil
 }
 
@@ -96,6 +112,25 @@ func (am *ApplicationManager) setupLayerDependencies() error {
 	// HAL -> ServiceCoordination -> TaskOrchestration -> BusinessLogic
 	am.logger.Info("Horizontal layer dependencies established")
 	return nil
+}
+
+// setupCommandHandlers 注册命令处理器到路由器
+func (am *ApplicationManager) setupCommandHandlers() {
+	am.logger.Info("Registering command handlers")
+
+	// 注册业务逻辑层处理器
+	am.commandRouter.RegisterHandler(am.businessLogic)
+
+	// 注册配置管理处理器
+	am.commandRouter.RegisterHandler(am.configHandler)
+
+	// 记录注册的处理器
+	registeredHandlers := am.commandRouter.GetRegisteredHandlers()
+	for handlerName, commands := range registeredHandlers {
+		am.logger.Info("Registered handler", "handler", handlerName, "commands", commands)
+	}
+
+	am.logger.Info("Command handlers registered successfully")
 }
 
 // Start 启动应用层，现在按照水平分层架构启动
@@ -167,12 +202,8 @@ func (am *ApplicationManager) Stop() error {
 func (am *ApplicationManager) registerIPCHandlers(ipcServer *ipc.IPCServer) {
 	am.logger.Info("Registering IPC handlers")
 
-	ipcServer.RegisterHandler("task_request", am.handleTaskRequest)
-	ipcServer.RegisterHandler("task_template_request", am.handleTaskTemplateRequest)
-	ipcServer.RegisterHandler("task_node_request", am.handleTaskNodeRequest)
-	ipcServer.RegisterHandler("abstract_command_request", am.handleAbstractCommandRequest)
-	ipcServer.RegisterHandler("status_request", am.handleStatusRequest)
-	ipcServer.RegisterHandler("config_update", am.handleConfigUpdate)
+	// 注册新的简化业务命令处理器
+	ipcServer.RegisterHandler("business_command", am.handleBusinessCommand)
 }
 
 // setupTaskChannels 设置任务处理通道
@@ -213,94 +244,102 @@ func (am *ApplicationManager) processTask(task *types.Task) {
 	}
 }
 
-// IPC消息处理方法 - 现在通过业务逻辑层处理
-func (am *ApplicationManager) handleTaskRequest(message types.IPCMessage) {
-	am.logger.Info("Received task request", "message", message)
 
-	// 通过业务逻辑层处理任务请求
-	// 这里会处理具体业务逻辑验证、安全检查等
+
+// handleBusinessCommand 处理新的简化业务命令
+func (am *ApplicationManager) handleBusinessCommand(message types.IPCMessage) {
+	am.logger.Info("Received business command", "message", message)
+
 	go func() {
-		// 解析任务请求并执行
-		am.logger.Info("Processing task request through business logic layer")
-		// 具体实现将在后续完成
-	}()
-}
-
-func (am *ApplicationManager) handleTaskTemplateRequest(message types.IPCMessage) {
-	am.logger.Info("Received task template request", "message", message)
-
-	// 通过任务编排层处理模板请求
-	go func() {
-		am.logger.Info("Processing task template request through task orchestration layer")
-		// 具体实现将在后续完成
-	}()
-}
-
-func (am *ApplicationManager) handleTaskNodeRequest(message types.IPCMessage) {
-	am.logger.Info("Received task node request", "message", message)
-
-	// 通过任务编排层处理节点请求
-	go func() {
-		am.logger.Info("Processing task node request through task orchestration layer")
-		// 具体实现将在后续完成
-	}()
-}
-
-func (am *ApplicationManager) handleAbstractCommandRequest(message types.IPCMessage) {
-	am.logger.Info("Received abstract command request", "message", message)
-
-	// 通过业务逻辑层处理抽象命令请求
-	go func() {
-		// 解析抽象命令和参数
-		abstractCmd, params := am.parseAbstractCommand(message)
-		if abstractCmd != "" {
-			task, err := am.businessLogic.ExecuteAbstractCommand(abstractCmd, params)
-			if err != nil {
-				am.logger.Error("Failed to execute abstract command", "command", abstractCmd, "error", err)
-				return
-			}
-			am.logger.Info("Abstract command executed successfully", "command", abstractCmd, "task_id", task.ID)
-		}
-	}()
-}
-
-func (am *ApplicationManager) handleStatusRequest(message types.IPCMessage) {
-	am.logger.Info("Received status request", "message", message)
-
-	// 通过业务逻辑层获取系统状态
-	go func() {
-		status, err := am.businessLogic.GetSystemStatus()
+		// 解析业务消息
+		businessMsg, err := am.parseBusinessMessage(message)
 		if err != nil {
-			am.logger.Error("Failed to get system status", "error", err)
+			am.logger.Error("Failed to parse business message", "error", err)
+			am.sendBusinessErrorResponse(message.Source, "", err.Error())
 			return
 		}
-		am.logger.Info("System status retrieved successfully", "status", status)
-		// 这里可以将状态返回给IPC客户端
+
+		// 智能路由到相应的处理逻辑
+		response := am.routeBusinessCommand(businessMsg)
+		am.sendBusinessResponse(message.Source, response)
 	}()
 }
 
-func (am *ApplicationManager) handleConfigUpdate(message types.IPCMessage) {
-	am.logger.Info("Received config update", "message", message)
-
-	// 配置更新处理，可能需要重启某些层级
-	go func() {
-		am.logger.Info("Processing configuration update")
-		// 具体实现将在后续完成
-	}()
-}
-
-// parseAbstractCommand 解析IPC消息中的抽象命令
-func (am *ApplicationManager) parseAbstractCommand(message types.IPCMessage) (types.AbstractCommand, map[string]interface{}) {
-	// 根据simulator发送的IPC消息格式解析抽象命令
+// parseBusinessMessage 解析IPC消息到BusinessMessage
+func (am *ApplicationManager) parseBusinessMessage(message types.IPCMessage) (*types.BusinessMessage, error) {
 	if command, ok := message.Data["command"].(string); ok {
-		if params, ok := message.Data["parameters"].(map[string]interface{}); ok {
-			return types.AbstractCommand(command), params
-		} else {
-			return types.AbstractCommand(command), make(map[string]interface{})
+		businessMsg := &types.BusinessMessage{
+			Command:   types.BusinessCommand(command),
+			Source:    message.Source,
+			Target:    message.Target,
+			RequestID: message.ID,
+			Timestamp: time.Now(),
 		}
+
+		if params, ok := message.Data["params"].(map[string]interface{}); ok {
+			businessMsg.Params = params
+		} else {
+			businessMsg.Params = make(map[string]interface{})
+		}
+
+		return businessMsg, nil
 	}
-	return "", make(map[string]interface{})
+
+	return nil, fmt.Errorf("invalid business command format")
 }
+
+// routeBusinessCommand 使用命令路由器智能路由业务命令到具体实现
+func (am *ApplicationManager) routeBusinessCommand(msg *types.BusinessMessage) *types.BusinessResponse {
+	am.logger.Info("Routing business command through command router", "command", msg.Command)
+
+	// 使用命令路由器路由命令到相应的处理器
+	return am.commandRouter.RouteCommand(am.ctx, msg)
+}
+
+
+// sendBusinessResponse 发送业务响应
+func (am *ApplicationManager) sendBusinessResponse(target string, response *types.BusinessResponse) {
+	if target == "" {
+		return
+	}
+
+	ipcServer := am.infrastructure.GetIPCServer()
+	if ipcServer == nil {
+		am.logger.Error("IPC server not available for sending response")
+		return
+	}
+
+	// 将BusinessResponse转换为IPCMessage
+	ipcMessage := types.IPCMessage{
+		Type:      "business_response",
+		Source:    "control_system",
+		Target:    target,
+		Data: map[string]interface{}{
+			"request_id": response.RequestID,
+			"status":     response.Status,
+			"data":       response.Data,
+			"error":      response.Error,
+		},
+		Timestamp: time.Now(),
+		ID:        fmt.Sprintf("resp-%d", time.Now().UnixNano()),
+	}
+
+	if err := ipcServer.SendToClient(target, ipcMessage); err != nil {
+		am.logger.Error("Failed to send business response", "target", target, "error", err)
+	}
+}
+
+// sendBusinessErrorResponse 发送错误响应
+func (am *ApplicationManager) sendBusinessErrorResponse(target, requestID, errorMsg string) {
+	response := &types.BusinessResponse{
+		RequestID: requestID,
+		Status:    "error",
+		Error:     errorMsg,
+		Timestamp: time.Now(),
+	}
+	am.sendBusinessResponse(target, response)
+}
+
 
 // 新增：获取各层的访问方法
 func (am *ApplicationManager) GetHAL() *hal.HardwareAbstractionLayer {
@@ -320,9 +359,6 @@ func (am *ApplicationManager) GetBusinessLogicLayer() *application.BusinessLogic
 }
 
 // 新增：高级业务操作方法，委托给业务逻辑层
-func (am *ApplicationManager) ExecuteAbstractCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) (*types.Task, error) {
-	return am.businessLogic.ExecuteAbstractCommand(abstractCmd, params)
-}
 
 func (am *ApplicationManager) SelfCheck() error {
 	return am.businessLogic.SelfCheck()

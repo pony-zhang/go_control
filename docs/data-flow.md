@@ -2,7 +2,7 @@
 
 ## 数据流总览
 
-运动控制系统的数据流遵循先进的分层处理模式，从外部请求到物理设备执行，经过协调层、基础设施层、应用层的多个水平子层处理阶段。每个层次都有明确的职责边界和数据转换规则，确保系统的可靠性和可维护性。
+运动控制系统的数据流遵循先进的分层处理模式和事件驱动架构，从外部请求到物理设备执行，经过协调层、基础设施层、应用层的多个水平子层处理阶段。系统采用命令路由器和订阅分发机制，实现了模块化、可扩展的数据处理流程。每个层次都有明确的职责边界和数据转换规则，确保系统的可靠性和可维护性。
 
 ## 主要数据结构
 
@@ -39,7 +39,28 @@ type MotionCommand struct {
 }
 ```
 
-### 3. IPC消息 (IPCMessage)
+### 3. 业务消息 (BusinessMessage)
+
+```go
+type BusinessMessage struct {
+    Command   BusinessCommand         // 业务命令类型
+    Source    string                 // 消息源
+    Target    string                 // 目标地址
+    RequestID string                 // 请求ID
+    Params    map[string]interface{} // 命令参数
+    Timestamp time.Time               // 时间戳
+}
+
+type BusinessResponse struct {
+    RequestID string                 // 请求ID
+    Status    string                 // 响应状态
+    Data      map[string]interface{} // 响应数据
+    Error     string                 // 错误信息
+    Timestamp time.Time               // 时间戳
+}
+```
+
+### 4. IPC消息 (IPCMessage)
 
 ```go
 type IPCMessage struct {
@@ -54,10 +75,10 @@ type IPCMessage struct {
 
 ## 数据流详细分析
 
-### 1. 任务请求流程 (新架构)
+### 1. 事件驱动命令流程 (新架构)
 
 ```
-外部客户端 → IPC服务器 → 业务逻辑层 → 任务编排层 → 服务协调层 → HAL → 物理设备
+外部客户端 → IPC服务器 → ApplicationManager → CommandRouter → CommandHandlers → 各层处理
 ```
 
 **步骤详解**:
@@ -76,7 +97,7 @@ type IPCMessage struct {
 
 2. **消息接收和路由** (IPC Server → ApplicationManager)
    ```go
-   // 消息解码和路由到业务逻辑层
+   // 消息解码和路由到ApplicationManager
    for message := range client.ReceiveChan {
        if handler, exists := s.handlers[message.Type]; exists {
            go handler(message)  // 委托给ApplicationManager处理
@@ -84,89 +105,138 @@ type IPCMessage struct {
    }
    ```
 
-3. **抽象命令处理** (Business Logic Layer)
+3. **业务消息处理** (ApplicationManager)
    ```go
-   // 业务逻辑层处理高级抽象命令
-   func (am *ApplicationManager) handleAbstractCommandRequest(message types.IPCMessage) {
-       abstractCmd, params := am.parseAbstractCommand(message)
-       task, err := am.businessLogic.ExecuteAbstractCommand(abstractCmd, params)
-       // 业务规则验证、安全检查、任务创建
+   // ApplicationManager处理业务命令
+   func (am *ApplicationManager) handleBusinessCommand(message types.IPCMessage) {
+       businessMsg, err := am.parseBusinessMessage(message)
+       if err != nil {
+           am.sendBusinessErrorResponse(message.Source, "", err.Error())
+           return
+       }
+
+       // 通过命令路由器自动路由到相应的处理器
+       response := am.routeBusinessCommand(businessMsg)
+       am.sendBusinessResponse(message.Source, response)
    }
    ```
 
-4. **任务编排** (Task Orchestration Layer)
+4. **命令路由和处理** (CommandRouter → CommandHandlers)
+   ```go
+   // CommandRouter自动路由命令到相应的处理器
+   func (cr *CommandRouter) RouteCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse {
+       handler, exists := cr.handlers[msg.Command]
+       if !exists {
+           return &types.BusinessResponse{
+               RequestID: msg.RequestID,
+               Status:    "error",
+               Error:     fmt.Sprintf("no handler registered for command: %s", msg.Command),
+               Timestamp: time.Now(),
+           }
+       }
+       return handler.HandleCommand(ctx, msg)
+   }
+   ```
+
+5. **业务逻辑层处理** (BusinessLogicLayer)
+   ```go
+   // BusinessLogicLayer实现CommandHandler接口
+   func (bll *BusinessLogicLayer) HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse {
+       switch msg.Command {
+       case types.CmdQueryStatus:
+           return bll.handleQueryStatus(msg)
+       case types.CmdSelfCheck:
+           return bll.handleSelfCheck(msg)
+       case types.CmdEmergencyStop:
+           return bll.handleEmergencyStop(msg)
+       // ... 其他命令处理
+       }
+   }
+   ```
+
+6. **任务创建和调度** (Task Orchestration Layer)
    ```go
    // 任务调度和分解
-   func (tol *TaskOrchestrationLayer) ExecuteAbstractCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) (*types.Task, error) {
-       task, err := tol.commandMappingMgr.ExecuteAbstractCommand(abstractCmd, params)
-       return tol.taskScheduler.ScheduleTask(task)
+   func (bll *BusinessLogicLayer) ExecuteBusinessCommand(command types.BusinessCommand, params map[string]interface{}) (*types.Task, error) {
+       task := &types.Task{
+           ID:         fmt.Sprintf("business-%s-%d", command, time.Now().UnixNano()),
+           Type:       bll.mapBusinessToCommandType(command),
+           Priority:   bll.mapBusinessToPriority(command),
+           Status:     types.StatusPending,
+           Parameters: params,
+           CreatedAt:  time.Now(),
+           Timeout:    bll.mapBusinessToTimeout(command),
+       }
+
+       return bll.taskOrchestration.ScheduleTask(task)
    }
    ```
 
-### 2. 任务验证和调度流程 (新架构)
+### 2. 命令处理器注册和管理
 
 ```
-抽象命令 → 业务验证 → 资源分配 → 任务调度 → 服务协调 → HAL执行
+CommandHandler实现 → 注册到CommandRouter → 命令映射 → 自动路由
 ```
 
 **步骤详解**:
 
-1. **业务规则验证** (Business Logic Layer)
+1. **CommandHandler实现** (各层模块)
    ```go
-   // 业务规则验证和安全检查
-   func (bll *BusinessLogicLayer) ExecuteAbstractCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) (*types.Task, error) {
-       // 输入参数验证
-       if err := bll.validationManager.ValidateCommand(abstractCmd, params); err != nil {
-           return nil, fmt.Errorf("command validation failed: %w", err)
+   // BusinessLogicLayer实现CommandHandler接口
+   func (bll *BusinessLogicLayer) GetHandledCommands() []types.BusinessCommand {
+       return []types.BusinessCommand{
+           types.CmdQueryStatus,
+           types.CmdSelfCheck,
+           types.CmdEmergencyStop,
+           types.CmdHome,
+           types.CmdInitialize,
+           types.CmdSafetyCheck,
        }
+   }
 
-       // 业务规则应用
-       if err := bll.businessRules.ApplyRules(abstractCmd, params); err != nil {
-           return nil, fmt.Errorf("business rules validation failed: %w", err)
-       }
-
-       // 安全检查
-       if err := bll.safetyManager.CheckCommandSafety(abstractCmd, params); err != nil {
-           return nil, fmt.Errorf("safety check failed: %w", err)
+   // ConfigHandler实现CommandHandler接口
+   func (ch *ConfigHandler) GetHandledCommands() []types.BusinessCommand {
+       return []types.BusinessCommand{
+           types.CmdGetConfig,
+           types.CmdSetConfig,
+           types.CmdListTemplates,
        }
    }
    ```
 
-2. **资源分配** (Service Coordination Layer → HAL)
+2. **处理器注册** (ApplicationManager)
    ```go
-   // 硬件资源动态分配
-   func (scl *ServiceCoordinationLayer) ExecuteCommand(ctx context.Context, cmd types.MotionCommand) error {
-       // 分配设备资源
-       if err := scl.AllocateDeviceResource(cmd.DeviceID); err != nil {
-           return fmt.Errorf("device resource allocation failed: %w", err)
-       }
+   // 在ApplicationManager中注册所有命令处理器
+   func (am *ApplicationManager) setupCommandHandlers() {
+       // 注册业务逻辑层处理器
+       am.commandRouter.RegisterHandler(am.businessLogic)
 
-       // 通过HAL执行命令
-       return scl.hal.ExecuteCommand(ctx, cmd)
+       // 注册配置管理处理器
+       am.commandRouter.RegisterHandler(am.configHandler)
+
+       // 记录注册的处理器
+       registeredHandlers := am.commandRouter.GetRegisteredHandlers()
+       for handlerName, commands := range registeredHandlers {
+           am.logger.Info("Registered handler", "handler", handlerName, "commands", commands)
+       }
    }
    ```
 
-3. **任务调度和分解** (Task Orchestration Layer)
+3. **命令映射管理** (CommandRouter)
    ```go
-   // 任务调度和分解处理
-   func (tol *TaskOrchestrationLayer) processTask(task *types.Task) {
-       // 分解任务为命令序列
-       commands, err := tol.taskDecomposer.DecomposeTask(task)
-       if err != nil {
-           tol.logger.Error("Failed to decompose task", "task_id", task.ID, "error", err)
-           return
-       }
-
-       // 通过服务协调层执行命令
-       for _, cmd := range commands {
-           if err := tol.serviceCoordination.ExecuteCommand(tol.ctx, cmd); err != nil {
-               tol.logger.Error("Failed to execute command", "command_id", cmd.ID, "error", err)
+   // CommandRouter维护命令到处理器的映射
+   func (cr *CommandRouter) RegisterHandler(handler CommandHandler) {
+       for _, cmd := range handler.GetHandledCommands() {
+           if existing, exists := cr.handlers[cmd]; exists {
+               cr.logger.Warn("Command handler conflict", "command", cmd, "existing_handler", existing.GetName(), "new_handler", handler.GetName())
            }
+           cr.handlers[cmd] = handler
+           cr.logger.Info("Registered command handler", "command", cmd, "handler", handler.GetName())
        }
    }
    ```
 
-### 3. 任务分解流程
+### 3. 任务处理流程 (保持不变)
 
 ```
 高级任务 → 轨迹规划 → 命令序列 → 执行队列
@@ -542,13 +612,15 @@ func (cm *ConfigManager) saveSystemState(state *SystemState) error {
 
 ## 总结
 
-运动控制系统的数据流设计体现了现代工业控制系统的核心特征：
+运动控制系统的数据流设计体现了现代工业控制系统的核心特征，并集成了事件驱动的命令处理架构：
 
 1. **分层处理**: 从高层任务到底层命令的清晰分层
-2. **异步处理**: 通过通道实现高效的异步通信
-3. **状态管理**: 完善的状态跟踪和转换机制
-4. **错误处理**: 多层次的错误处理和恢复机制
-5. **性能监控**: 全面的系统性能指标收集
-6. **数据一致性**: 并发控制和事务性操作保证
+2. **事件驱动**: 命令路由器和订阅分发机制实现了模块化处理
+3. **异步处理**: 通过通道实现高效的异步通信
+4. **状态管理**: 完善的状态跟踪和转换机制
+5. **错误处理**: 多层次的错误处理和恢复机制
+6. **性能监控**: 全面的系统性能指标收集
+7. **数据一致性**: 并发控制和事务性操作保证
+8. **可扩展性**: 通过CommandHandler接口轻松添加新的命令处理器
 
-这种设计确保了系统在高负载、高可靠性要求下的稳定运行，为工业自动化应用提供了坚实的技术基础。
+这种设计确保了系统在高负载、高可靠性要求下的稳定运行，为工业自动化应用提供了坚实的技术基础。事件驱动的架构使得系统更加模块化、可维护和可扩展。

@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -38,12 +37,8 @@ func (s *Simulator) Start() error {
 		return fmt.Errorf("failed to connect to IPC server: %w", err)
 	}
 
-	s.ipcClient.RegisterHandler("status_response", s.handleStatusResponse)
-	s.ipcClient.RegisterHandler("task_response", s.handleTaskResponse)
-	s.ipcClient.RegisterHandler("task_template_response", s.handleTaskTemplateResponse)
-	s.ipcClient.RegisterHandler("task_node_response", s.handleTaskNodeResponse)
-	s.ipcClient.RegisterHandler("abstract_command_response", s.handleAbstractCommandResponse)
-	s.ipcClient.RegisterHandler("error_response", s.handleErrorResponse)
+	// 注册业务响应处理器
+	s.ipcClient.RegisterHandler("business_response", s.handleBusinessResponse)
 
 	s.running = true
 	go s.runSimulation()
@@ -80,313 +75,101 @@ func (s *Simulator) runSimulation() {
 }
 
 func (s *Simulator) simulateActivity() {
-	action := rand.Intn(8)
-
-	switch action {
-	case 0:
-		s.sendStatusRequest()
-	case 1:
-		s.sendMoveTask()
-	case 2:
-		s.sendHomeTask()
-	case 3:
-		s.sendTaskTemplateRequest()
-	case 4:
-		s.sendTaskNodeRequest()
-	case 5:
-		s.sendTemplateExecutionRequest()
-	case 6:
-		s.sendAbstractCommandRequest()
-	case 7:
-		s.sendCommandListRequest()
-	}
+	// 只使用新的简化业务命令
+	s.simulateBusinessCommands()
 }
 
-func (s *Simulator) sendStatusRequest() {
-	message := types.IPCMessage{
-		Type:      "status_request",
-		Source:    s.clientID,
-		Target:    "control_system",
-		Data:      map[string]interface{}{"request": "full_status"},
-		Timestamp: time.Now(),
-		ID:        fmt.Sprintf("msg-%d", time.Now().UnixNano()),
+// simulateBusinessCommands 使用新的简化业务命令
+func (s *Simulator) simulateBusinessCommands() {
+	commands := []types.BusinessCommand{
+		types.CmdQueryStatus,
+		types.CmdMove,
+		types.CmdHome,
+		types.CmdEmergencyStop,
+		types.CmdSafetyCheck,
+		types.CmdSelfCheck,
+		types.CmdListTemplates,
 	}
 
-	if err := s.ipcClient.Send(message); err != nil {
-		log.Printf("Failed to send status request: %v", err)
-	}
-}
+	command := commands[rand.Intn(len(commands))]
 
-func (s *Simulator) sendMoveTask() {
-	target := types.Point{
-		X: rand.Float64()*200 - 100,
-		Y: rand.Float64()*200 - 100,
-		Z: rand.Float64()*100 - 50,
-	}
-
-	velocity := types.Velocity{
-		Linear:  rand.Float64()*50 + 10,
-		Angular: rand.Float64() * 10,
-	}
-
-	taskData := map[string]interface{}{
-		"type":     "move_to",
-		"target":   target,
-		"velocity": velocity,
-		"axes":     []string{"axis-x", "axis-y"},
-	}
-
-	message := types.IPCMessage{
-		Type:      "task_request",
-		Source:    s.clientID,
-		Target:    "control_system",
-		Data:      map[string]interface{}{"task": taskData},
-		Timestamp: time.Now(),
-		ID:        fmt.Sprintf("msg-%d", time.Now().UnixNano()),
-	}
-
-	if err := s.ipcClient.Send(message); err != nil {
-		log.Printf("Failed to send move task: %v", err)
-	} else {
-		log.Printf("Sent move task: target=%v, velocity=%v", target, velocity)
-	}
-}
-
-func (s *Simulator) sendHomeTask() {
-	taskData := map[string]interface{}{
-		"type": "home",
-		"axes": []string{"axis-x", "axis-y", "axis-z"},
-	}
-
-	message := types.IPCMessage{
-		Type:      "task_request",
-		Source:    s.clientID,
-		Target:    "control_system",
-		Data:      map[string]interface{}{"task": taskData},
-		Timestamp: time.Now(),
-		ID:        fmt.Sprintf("msg-%d", time.Now().UnixNano()),
-	}
-
-	if err := s.ipcClient.Send(message); err != nil {
-		log.Printf("Failed to send home task: %v", err)
-	} else {
-		log.Println("Sent home task")
-	}
-}
-
-func (s *Simulator) handleStatusResponse(message types.IPCMessage) {
-	data, err := json.MarshalIndent(message.Data, "", "  ")
-	if err != nil {
-		log.Printf("Failed to marshal status response: %v", err)
-		return
-	}
-
-	log.Printf("Status received from %s:\n%s", message.Source, string(data))
-}
-
-func (s *Simulator) handleTaskResponse(message types.IPCMessage) {
-	taskID := message.Data["task_id"].(string)
-	status := message.Data["status"].(string)
-	log.Printf("Task response: %s -> %s", taskID, status)
-}
-
-func (s *Simulator) handleTaskTemplateResponse(message types.IPCMessage) {
-	if templates, ok := message.Data["templates"].([]interface{}); ok {
-		log.Printf("Available task templates: %v", templates)
-	} else if template, ok := message.Data["template"].(map[string]interface{}); ok {
-		if name, ok := template["name"].(string); ok {
-			log.Printf("Task template details: %s", name)
+	switch command {
+	case types.CmdQueryStatus:
+		s.sendBusinessCommand(command, map[string]interface{}{
+			"query_type": "system_status",
+		})
+	case types.CmdMove:
+		target := types.Point{
+			X: rand.Float64()*200 - 100,
+			Y: rand.Float64()*200 - 100,
+			Z: rand.Float64()*100 - 50,
 		}
-	} else if taskID, ok := message.Data["task_id"].(string); ok {
+		velocity := types.Velocity{
+			Linear:  rand.Float64()*50 + 10,
+			Angular: rand.Float64() * 10,
+		}
+		s.sendBusinessCommand(command, map[string]interface{}{
+			"target":   target,
+			"velocity": velocity,
+			"axes":     []string{"axis-x", "axis-y"},
+			"mode":     []string{"precise", "rapid", "simple"}[rand.Intn(3)],
+		})
+	case types.CmdHome:
+		s.sendBusinessCommand(command, map[string]interface{}{
+			"axes": []string{"axis-x", "axis-y", "axis-z"},
+			"mode": "standard",
+		})
+	case types.CmdEmergencyStop:
+		s.sendBusinessCommand(command, map[string]interface{}{
+			"reason": "simulated emergency",
+		})
+	case types.CmdSafetyCheck:
+		s.sendBusinessCommand(command, map[string]interface{}{
+			"check_type": "full_system",
+		})
+	case types.CmdSelfCheck:
+		s.sendBusinessCommand(command, map[string]interface{}{
+			"check_level": "comprehensive",
+		})
+	case types.CmdListTemplates:
+		s.sendBusinessCommand(command, map[string]interface{}{})
+	}
+}
+
+// handleBusinessResponse 处理新的业务命令响应
+func (s *Simulator) handleBusinessResponse(message types.IPCMessage) {
+	if requestID, ok := message.Data["request_id"].(string); ok {
 		if status, ok := message.Data["status"].(string); ok {
-			log.Printf("Template execution response: %s -> %s", taskID, status)
-		}
-	}
-}
-
-func (s *Simulator) handleTaskNodeResponse(message types.IPCMessage) {
-	if taskID, ok := message.Data["task_id"].(string); ok {
-		if status, ok := message.Data["status"].(string); ok {
-			log.Printf("Task node response: %s -> %s", taskID, status)
-		}
-	}
-}
-
-func (s *Simulator) handleErrorResponse(message types.IPCMessage) {
-	if errorType, ok := message.Data["error_type"].(string); ok {
-		if errorMsg, ok := message.Data["message"].(string); ok {
-			log.Printf("Error response: %s - %s", errorType, errorMsg)
-		}
-	}
-}
-
-func (s *Simulator) handleAbstractCommandResponse(message types.IPCMessage) {
-	if command, ok := message.Data["command"].(string); ok {
-		if taskID, ok := message.Data["task_id"].(string); ok {
-			if status, ok := message.Data["status"].(string); ok {
-				log.Printf("Abstract command response: %s -> %s (task: %s)", command, status, taskID)
+			if data, ok := message.Data["data"].(map[string]interface{}); ok {
+				log.Printf("Business response: %s -> %s", requestID, status)
+				log.Printf("Response data: %+v", data)
+			} else if errorMsg, ok := message.Data["error"].(string); ok {
+				log.Printf("Business error response: %s -> %s", requestID, errorMsg)
+			} else {
+				log.Printf("Business response: %s -> %s (no additional data)", requestID, status)
 			}
 		}
 	}
 }
 
-func (s *Simulator) sendTaskTemplateRequest() {
-	actions := []string{"list", "get"}
-	action := actions[rand.Intn(len(actions))]
-
+// sendBusinessCommand 发送新的简化业务命令
+func (s *Simulator) sendBusinessCommand(command types.BusinessCommand, params map[string]interface{}) {
 	message := types.IPCMessage{
-		Type:      "task_template_request",
-		Source:    s.clientID,
-		Target:    "control_system",
-		Timestamp: time.Now(),
-		ID:        fmt.Sprintf("msg-%d", time.Now().UnixNano()),
-	}
-
-	switch action {
-	case "list":
-		message.Data = map[string]interface{}{"action": "list"}
-	case "get":
-		templates := []string{"home_all", "safety_check", "motor_test"}
-		templateName := templates[rand.Intn(len(templates))]
-		message.Data = map[string]interface{}{
-			"action":        "get",
-			"template_name": templateName,
-		}
-	}
-
-	if err := s.ipcClient.Send(message); err != nil {
-		log.Printf("Failed to send task template request: %v", err)
-	} else {
-		log.Printf("Sent task template request: action=%s", action)
-	}
-}
-
-func (s *Simulator) sendTaskNodeRequest() {
-	nodeTypes := []string{"io", "motor_control", "delay", "motor_status"}
-	nodeType := nodeTypes[rand.Intn(len(nodeTypes))]
-
-	var nodeData map[string]interface{}
-
-	switch nodeType {
-	case "io":
-		nodeData = map[string]interface{}{
-			"type": "io",
-			"parameters": map[string]interface{}{
-				"device_id": "device-1",
-				"channel":   fmt.Sprintf("sensor-%d", rand.Intn(5)+1),
-				"action":    []string{"read", "set", "toggle"}[rand.Intn(3)],
-				"value":     rand.Float64() * 100,
-			},
-		}
-	case "motor_control":
-		nodeData = map[string]interface{}{
-			"type": "motor_control",
-			"parameters": map[string]interface{}{
-				"device_id": "device-1",
-				"motor_id":  fmt.Sprintf("motor-%d", rand.Intn(3)+1),
-				"action":    []string{"start", "stop", "set_speed"}[rand.Intn(3)],
-				"speed":     rand.Float64()*200 + 50,
-			},
-		}
-	case "delay":
-		nodeData = map[string]interface{}{
-			"type": "delay",
-			"parameters": map[string]interface{}{
-				"duration": time.Duration(rand.Intn(5)+1) * time.Second,
-				"unit":     "s",
-			},
-		}
-	case "motor_status":
-		nodeData = map[string]interface{}{
-			"type": "motor_status",
-			"parameters": map[string]interface{}{
-				"device_id": "device-1",
-				"motor_id":  fmt.Sprintf("motor-%d", rand.Intn(3)+1),
-			},
-		}
-	}
-
-	message := types.IPCMessage{
-		Type:      "task_node_request",
-		Source:    s.clientID,
-		Target:    "control_system",
-		Data:      map[string]interface{}{"node": nodeData},
-		Timestamp: time.Now(),
-		ID:        fmt.Sprintf("msg-%d", time.Now().UnixNano()),
-	}
-
-	if err := s.ipcClient.Send(message); err != nil {
-		log.Printf("Failed to send task node request: %v", err)
-	} else {
-		log.Printf("Sent task node request: type=%s", nodeType)
-	}
-}
-
-func (s *Simulator) sendTemplateExecutionRequest() {
-	templates := []string{"home_all", "safety_check", "motor_test"}
-	templateName := templates[rand.Intn(len(templates))]
-
-	message := types.IPCMessage{
-		Type:      "task_template_request",
-		Source:    s.clientID,
-		Target:    "control_system",
+		Type:   "business_command",
+		Source: s.clientID,
+		Target: "control_system",
 		Data: map[string]interface{}{
-			"action":        "execute",
-			"template_name": templateName,
+			"command": string(command),
+			"params":  params,
 		},
 		Timestamp: time.Now(),
 		ID:        fmt.Sprintf("msg-%d", time.Now().UnixNano()),
 	}
 
 	if err := s.ipcClient.Send(message); err != nil {
-		log.Printf("Failed to send template execution request: %v", err)
+		log.Printf("Failed to send business command %s: %v", command, err)
 	} else {
-		log.Printf("Sent template execution request: template=%s", templateName)
-	}
-}
-
-func (s *Simulator) sendAbstractCommandRequest() {
-	commands := []string{"self_check", "reset", "start", "stop", "emergency_stop", "home", "initialize", "safety_check"}
-	command := commands[rand.Intn(len(commands))]
-
-	message := types.IPCMessage{
-		Type:      "abstract_command_request",
-		Source:    s.clientID,
-		Target:    "control_system",
-		Data: map[string]interface{}{
-			"command": command,
-			"parameters": map[string]interface{}{
-				"speed":     rand.Float64()*200 + 50,
-				"timeout":   time.Duration(rand.Intn(30)+5) * time.Second,
-			},
-		},
-		Timestamp: time.Now(),
-		ID:        fmt.Sprintf("msg-%d", time.Now().UnixNano()),
-	}
-
-	if err := s.ipcClient.Send(message); err != nil {
-		log.Printf("Failed to send abstract command request: %v", err)
-	} else {
-		log.Printf("Sent abstract command request: command=%s", command)
-	}
-}
-
-func (s *Simulator) sendCommandListRequest() {
-	message := types.IPCMessage{
-		Type:      "abstract_command_request",
-		Source:    s.clientID,
-		Target:    "control_system",
-		Data: map[string]interface{}{
-			"command": "list",
-		},
-		Timestamp: time.Now(),
-		ID:        fmt.Sprintf("msg-%d", time.Now().UnixNano()),
-	}
-
-	if err := s.ipcClient.Send(message); err != nil {
-		log.Printf("Failed to send command list request: %v", err)
-	} else {
-		log.Println("Sent command list request")
+		log.Printf("Sent business command: %s", command)
 	}
 }
 
