@@ -46,22 +46,6 @@ const (
 	CommandCondition   CommandType = "condition"
 )
 
-// High-level abstract commands for client interaction
-type AbstractCommand string
-
-const (
-	AbstractSelfCheck     AbstractCommand = "self_check"     // 自检
-	AbstractReset         AbstractCommand = "reset"         // 复位
-	AbstractStart         AbstractCommand = "start"         // 启动
-	AbstractStop          AbstractCommand = "stop"          // 停止
-	AbstractEmergencyStop AbstractCommand = "emergency_stop" // 急停
-	AbstractHome          AbstractCommand = "home"          // 回零
-	AbstractInitialize    AbstractCommand = "initialize"    // 初始化
-	AbstractPause         AbstractCommand = "pause"         // 暂停
-	AbstractResume        AbstractCommand = "resume"        // 恢复
-	AbstractSafetyCheck   AbstractCommand = "safety_check"  // 安全检查
-	AbstractReady         AbstractCommand = "ready"         // 准备就绪
-)
 
 type AxisID string
 type DeviceID string
@@ -208,7 +192,7 @@ type SystemConfig struct {
 	Safety            SafetyConfig                 `yaml:"safety"`
 	IPC               IPCConfig                    `yaml:"ipc"`
 	TaskTemplates     map[string]TaskTemplate      `yaml:"task_templates"`
-	CommandMappings   map[AbstractCommand]CommandMapping `yaml:"command_mappings"`
+	CommandMappings   map[string]CommandMapping `yaml:"command_mappings"`
 }
 
 type DeviceConfig struct {
@@ -265,11 +249,85 @@ type TaskNodeConfig struct {
 }
 
 type CommandMapping struct {
-	AbstractCommand AbstractCommand         `yaml:"abstract_command"`
-	Description     string                 `yaml:"description"`
-	Template        string                 `yaml:"template,omitempty"`
-	Nodes           []TaskNodeConfig       `yaml:"nodes,omitempty"`
-	Parameters      map[string]interface{} `yaml:"parameters,omitempty"`
-	Priority        TaskPriority           `yaml:"priority"`
-	Timeout         time.Duration          `yaml:"timeout"`
+	CommandName string                 `yaml:"command_name"`
+	Description string                 `yaml:"description"`
+	Template    string                 `yaml:"template,omitempty"`
+	Nodes       []TaskNodeConfig       `yaml:"nodes,omitempty"`
+	Parameters  map[string]interface{} `yaml:"parameters,omitempty"`
+	Priority    TaskPriority           `yaml:"priority"`
+	Timeout     time.Duration          `yaml:"timeout"`
+}
+
+// BusinessCommand represents high-level business commands for frontend interaction
+// These commands are business-oriented and implementation-agnostic
+type BusinessCommand string
+
+const (
+	// System Control Commands
+	CmdQueryStatus     BusinessCommand = "query"      // Query system status
+	CmdInitialize      BusinessCommand = "initialize" // Initialize system
+	CmdEmergencyStop   BusinessCommand = "stop"       // Emergency stop
+	CmdReset           BusinessCommand = "reset"      // Reset system
+
+	// Motion Control Commands
+	CmdMove            BusinessCommand = "move"       // Move to position
+	CmdMoveRelative    BusinessCommand = "move_relative" // Move relative to current position
+	CmdHome            BusinessCommand = "home"       // Home axes
+	CmdJog             BusinessCommand = "jog"        // Manual jog operation
+	CmdStopMotion      BusinessCommand = "stop_motion" // Stop motion
+
+	// Safety and Check Commands
+	CmdSafetyCheck     BusinessCommand = "safety"     // Safety check
+	CmdSelfCheck       BusinessCommand = "self_check" // System self-check
+
+	// Configuration Commands
+	CmdGetConfig       BusinessCommand = "get_config" // Get configuration
+	CmdSetConfig       BusinessCommand = "set_config" // Set configuration
+	CmdListTemplates   BusinessCommand = "list_templates" // List task templates
+)
+
+// BusinessMessage represents simplified frontend command message
+type BusinessMessage struct {
+	Command   BusinessCommand       `json:"command"`    // Business command type
+	Params    map[string]interface{} `json:"params"`     // Command parameters
+	RequestID string                `json:"request_id"` // Request identifier
+	Source    string                `json:"source"`     // Message source
+	Target    string                `json:"target"`     // Message target
+	Timestamp time.Time              `json:"timestamp"`  // Message timestamp
+}
+
+// BusinessResponse represents response to business command
+type BusinessResponse struct {
+	RequestID string                 `json:"request_id"` // Original request ID
+	Status    string                 `json:"status"`     // Response status
+	Data      map[string]interface{} `json:"data"`       // Response data
+	Error     string                 `json:"error"`      // Error message if any
+	Timestamp time.Time              `json:"timestamp"`  // Response timestamp
+}
+
+// Command parameters structures
+type MoveParams struct {
+	Target    Point   `json:"target"`     // Target position
+	Velocity  Velocity `json:"velocity"`   // Target velocity
+	Axes      []AxisID `json:"axes"`       // Axes to move
+	Mode      string  `json:"mode"`       // Move mode (precise, rapid, etc.)
+	Timeout   time.Duration `json:"timeout"`  // Operation timeout
+}
+
+type HomeParams struct {
+	Axes     []AxisID `json:"axes"`   // Axes to home
+	Sequence []string `json:"sequence"` // Home sequence
+	Mode     string   `json:"mode"`   // Home mode
+	Timeout  time.Duration `json:"timeout"`  // Operation timeout
+}
+
+type SafetyCheckParams struct {
+	CheckType string                 `json:"check_type"` // Type of safety check
+	Params    map[string]interface{} `json:"params"`     // Check-specific parameters
+	Timeout   time.Duration          `json:"timeout"`    // Check timeout
+}
+
+type ConfigParams struct {
+	ConfigType string                 `json:"config_type"` // Configuration type
+	Params     map[string]interface{} `json:"params"`      // Configuration parameters
 }

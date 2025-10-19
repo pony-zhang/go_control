@@ -86,6 +86,13 @@ This is a Go-based motion control system for industrial automation with a sophis
 - Business rule enforcement and validation
 - Safety management and emergency handling
 - System status monitoring and reporting
+- Implements CommandHandler interface for event-driven processing
+
+**Event-Driven Command System:**
+- **CommandRouter** (`internal/core/command_handler.go`): Centralized command routing with subscription model
+- **CommandHandler Interface**: Modular command processing interface for all layers
+- **Event-Driven Architecture**: Commands automatically routed to subscribed handlers
+- **Decoupled Processing**: Each module handles only its subscribed commands
 
 **Core Components:**
 - **Task Trigger** (`internal/core/trigger.go`): Manages incoming task requests
@@ -112,10 +119,17 @@ This is a Go-based motion control system for industrial automation with a sophis
 - Device abstraction supports multiple protocols (Mock, Modbus, extensible)
 - Task nodes form a tree structure for complex workflows
 
+**Event-Driven Command Processing:**
+- **CommandHandler Interface**: Standardized interface for command processing modules
+- **Subscription-Based Routing**: Modules subscribe to commands they handle
+- **Automatic Command Routing**: CommandRouter manages command distribution
+- **Publisher-Subscriber Pattern**: Clean separation between command generation and processing
+
 **Command Mapping System:**
 - High-level abstract commands (e.g., "home", "emergency_stop") map to low-level command sequences
 - Configurable through YAML with templates and custom node definitions
 - Supports Chinese descriptions for industrial use cases
+- Simplified frontend interface with automatic backend routing
 
 **Priority-Based Scheduling:**
 - Task priorities: Emergency (0), High (1), Medium (2), Low (3)
@@ -157,11 +171,19 @@ Extensible through the `Protocol` interface in `internal/hal/protocol_manager.go
 
 ## System Operations
 
-**High-Level Abstract Commands (via Business Logic Layer):**
+**High-Level Abstract Commands (via Event-Driven System):**
 - **System Control**: `self_check`, `initialize_system`, `start_system`, `stop_system`, `reset_system`
 - **Safety Operations**: `emergency_stop`, `safety_check`
 - **Motion Control**: `home_system`, `move_to`, `move_relative`
+- **Configuration**: `get_config`, `set_config`, `list_templates`
 - **I/O Operations**: Sensor/actuator control through abstracted interfaces
+
+**Event-Driven Command Flow:**
+1. Frontend sends simplified `BusinessCommand` via IPC
+2. `CommandRouter` automatically routes to appropriate handler
+3. Handlers implement `CommandHandler` interface
+4. Each module processes only its subscribed commands
+5. Responses routed back to frontend through unified interface
 
 **Task Node Types:**
 - Basic motion: move_to, move_relative, home, stop, jog
@@ -193,19 +215,23 @@ The system includes Chinese descriptions and comments for industrial automation 
 **Maintainability:**
 - Clear separation of concerns across horizontal layers
 - Each layer has well-defined responsibilities
-- Easier debugging and troubleshooting
+- Event-driven architecture eliminates complex routing logic
+- Easier debugging and troubleshooting through modular design
 
 **Extensibility:**
 - New hardware types can be added through HAL protocol adapters
 - Business rules can be modified without affecting hardware layers
-- New command types can be added through the mapping system
+- New command handlers can be added by implementing `CommandHandler` interface
+- Subscription-based routing allows for easy module addition
 
 **Safety:**
 - Safety checks integrated at the business logic level
 - Emergency stop bypasses normal validation for immediate response
 - Resource allocation prevents hardware conflicts
+- Event-driven architecture ensures proper command handling
 
 **Performance:**
 - Efficient resource utilization through HAL management
 - Optimized task scheduling and execution flow
 - Reduced hardware communication overhead
+- Event-driven processing minimizes unnecessary routing logic

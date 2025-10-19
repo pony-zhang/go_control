@@ -14,8 +14,7 @@ type TaskOrchestrationLayer struct {
 	serviceCoordination *ServiceCoordinationLayer
 	taskScheduler       *core.TaskScheduler
 	taskDecomposer      *core.TaskNodeDecomposer
-	commandMappingMgr   *core.CommandMappingManager
-	taskTrigger         *core.TaskTrigger
+		taskTrigger         *core.TaskTrigger
 	logger              *logging.Logger
 	ctx                 context.Context
 }
@@ -26,7 +25,6 @@ func NewTaskOrchestrationLayer(serviceCoord *ServiceCoordinationLayer, config ty
 		serviceCoordination: serviceCoord,
 		taskScheduler:       core.NewTaskScheduler(config),
 		taskDecomposer:      core.NewTaskNodeDecomposer(config),
-		commandMappingMgr:   core.NewCommandMappingManager(config, core.NewTaskNodeDecomposer(config)),
 		taskTrigger:         core.NewTaskTrigger(config),
 		logger:              logging.GetLogger("task_orchestration"),
 	}
@@ -158,35 +156,6 @@ func (tol *TaskOrchestrationLayer) GetTaskStatus(taskID string) (types.TaskStatu
 	return tol.taskScheduler.GetTaskStatus(taskID)
 }
 
-// ExecuteAbstractCommand executes an abstract command through mapping
-func (tol *TaskOrchestrationLayer) ExecuteAbstractCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) (*types.Task, error) {
-	tol.logger.Info("Executing abstract command", "command", abstractCmd, "params", params)
-
-	task, err := tol.commandMappingMgr.ExecuteAbstractCommand(abstractCmd, params)
-	if err != nil {
-		tol.logger.Error("Failed to execute abstract command", "command", abstractCmd, "error", err)
-		return nil, err
-	}
-
-	// Schedule the created task
-	if err := tol.ScheduleTask(task); err != nil {
-		tol.logger.Error("Failed to schedule abstract command task", "task_id", task.ID, "error", err)
-		return nil, err
-	}
-
-	tol.logger.Info("Abstract command executed successfully", "command", abstractCmd, "task_id", task.ID)
-	return task, nil
-}
-
-// GetAvailableCommands returns available abstract commands
-func (tol *TaskOrchestrationLayer) GetAvailableCommands() []types.AbstractCommand {
-	return tol.commandMappingMgr.GetAvailableCommands()
-}
-
-// GetCommandDescription returns the description of an abstract command
-func (tol *TaskOrchestrationLayer) GetCommandDescription(abstractCmd types.AbstractCommand) (string, error) {
-	return tol.commandMappingMgr.GetCommandDescription(abstractCmd)
-}
 
 // TriggerTask triggers a new task by directly scheduling it
 func (tol *TaskOrchestrationLayer) TriggerTask(task *types.Task) error {
@@ -210,10 +179,6 @@ func (tol *TaskOrchestrationLayer) GetTaskDecomposer() *core.TaskNodeDecomposer 
 	return tol.taskDecomposer
 }
 
-// GetCommandMappingManager returns the command mapping manager
-func (tol *TaskOrchestrationLayer) GetCommandMappingManager() *core.CommandMappingManager {
-	return tol.commandMappingMgr
-}
 
 // GetServiceCoordination returns the service coordination layer
 func (tol *TaskOrchestrationLayer) GetServiceCoordination() *ServiceCoordinationLayer {

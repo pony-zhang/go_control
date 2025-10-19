@@ -100,7 +100,7 @@ go tool cover -html=coverage.out -o coverage.html
 
 ### 1. 分层架构
 
-系统采用四层主架构，应用层包含四个水平子层：
+系统采用四层主架构，应用层包含四个水平子层，并实现了事件驱动的命令处理系统：
 
 ```
 协调层 (Coordination Layer)
@@ -116,6 +116,12 @@ go tool cover -html=coverage.out -o coverage.html
     └── 硬件抽象层 (Hardware Abstraction Layer)
     ↓
 物理层 (Physical Layer)
+
+事件驱动命令系统:
+    ├── CommandRouter: 命令路由器
+    ├── CommandHandler: 命令处理器接口
+    ├── BusinessCommand: 简化业务命令类型
+    └── 事件订阅分发机制
 ```
 
 ### 2. 模块接口
@@ -142,6 +148,108 @@ type EventHandler interface {
 - 改为事件驱动的 `HandleEvent()` 方法
 - 模块通过 `GetSubscribedEvents()` 声明感兴趣的事件类型
 - EventLoop根据事件类型自动分发到相应的处理器
+
+### 3. 事件驱动命令处理
+
+#### 3.1 CommandHandler 接口
+
+```go
+type CommandHandler interface {
+    // GetHandledCommands 返回该处理器能处理的命令列表
+    GetHandledCommands() []types.BusinessCommand
+
+    // HandleCommand 处理业务命令并返回响应
+    HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse
+
+    // GetName 返回处理器名称，用于日志记录
+    GetName() string
+}
+```
+
+#### 3.2 CommandRouter 命令路由器
+
+```go
+type CommandRouter struct {
+    handlers map[types.BusinessCommand]CommandHandler
+    logger   Logger
+}
+
+// RegisterHandler 注册命令处理器
+func (cr *CommandRouter) RegisterHandler(handler CommandHandler) {
+    for _, cmd := range handler.GetHandledCommands() {
+        cr.handlers[cmd] = handler
+        cr.logger.Info("Registered command handler", "command", cmd, "handler", handler.GetName())
+    }
+}
+
+// RouteCommand 路由命令到相应的处理器
+func (cr *CommandRouter) RouteCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse {
+    handler, exists := cr.handlers[msg.Command]
+    if !exists {
+        return &types.BusinessResponse{
+            RequestID: msg.RequestID,
+            Status:    "error",
+            Error:     fmt.Sprintf("no handler registered for command: %s", msg.Command),
+            Timestamp: time.Now(),
+        }
+    }
+    return handler.HandleCommand(ctx, msg)
+}
+```
+
+#### 3.3 BusinessCommand 类型
+
+```go
+type BusinessCommand string
+
+const (
+    CmdQueryStatus     BusinessCommand = "query"
+    CmdMove            BusinessCommand = "move"
+    CmdHome            BusinessCommand = "home"
+    CmdEmergencyStop   BusinessCommand = "stop"
+    CmdInitialize      BusinessCommand = "initialize"
+    CmdSelfCheck       BusinessCommand = "self_check"
+    CmdSafetyCheck     BusinessCommand = "safety_check"
+    CmdGetConfig       BusinessCommand = "get_config"
+    CmdSetConfig       BusinessCommand = "set_config"
+    CmdListTemplates   BusinessCommand = "list_templates"
+)
+```
+
+#### 3.4 命令处理器实现示例
+
+```go
+// BusinessLogicLayer 实现 CommandHandler
+func (bll *BusinessLogicLayer) GetHandledCommands() []types.BusinessCommand {
+    return []types.BusinessCommand{
+        types.CmdQueryStatus,
+        types.CmdSelfCheck,
+        types.CmdEmergencyStop,
+        types.CmdHome,
+        types.CmdInitialize,
+        types.CmdSafetyCheck,
+    }
+}
+
+func (bll *BusinessLogicLayer) HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse {
+    switch msg.Command {
+    case types.CmdQueryStatus:
+        return bll.handleQueryStatus(msg)
+    case types.CmdSelfCheck:
+        return bll.handleSelfCheck(msg)
+    case types.CmdEmergencyStop:
+        return bll.handleEmergencyStop(msg)
+    // ... 其他命令处理
+    default:
+        return &types.BusinessResponse{
+            RequestID: msg.RequestID,
+            Status:    "error",
+            Error:     fmt.Sprintf("business logic layer cannot handle command: %s", msg.Command),
+            Timestamp: time.Now(),
+        }
+    }
+}
+```
 
 ### 3. 设备接口
 
@@ -192,9 +300,9 @@ const (
 )
 ```
 
-### 6. 水平层通信模式
+### 7. 水平层通信模式
 
-应用层各水平子层通过标准化接口通信：
+应用层各水平子层通过标准化接口通信，并集成了事件驱动命令处理：
 
 ```go
 // 业务逻辑层 → 任务编排层
@@ -205,6 +313,12 @@ func (tol *TaskOrchestrationLayer) ExecuteCommand(ctx context.Context, cmd types
 
 // 服务协调层 → 硬件抽象层
 func (scl *ServiceCoordinationLayer) ExecuteCommand(ctx context.Context, cmd types.MotionCommand) error
+
+// 事件驱动命令处理
+func (am *ApplicationManager) routeBusinessCommand(msg *types.BusinessMessage) *types.BusinessResponse {
+    am.logger.Info("Routing business command through command router", "command", msg.Command)
+    return am.commandRouter.RouteCommand(am.ctx, msg)
+}
 ```
 
 ## 添加新功能
@@ -280,70 +394,181 @@ devices:
       custom_param: value
 ```
 
-### 2. 添加新抽象命令
+### 2. 添加新业务命令
 
-#### 2.1 定义抽象命令类型
+#### 2.1 定义业务命令类型
 
 ```go
 // 在 types/types.go 中添加
-type AbstractCommand string
+type BusinessCommand string
 
 const (
-    AbstractCommandNewCommand AbstractCommand = "new_command"
-    // 其他抽象命令...
+    CmdNewCommand BusinessCommand = "new_command"
+    // 其他业务命令...
 )
 ```
 
-#### 2.2 实现业务逻辑层处理
+#### 2.2 实现 CommandHandler 接口
 
 ```go
-// 在 business_logic.go 中添加处理逻辑
-func (bll *BusinessLogicLayer) handleNewCommand(abstractCmd AbstractCommand, params map[string]interface{}) (*types.Task, error) {
+// 在相应的处理器中实现命令处理逻辑
+func (handler *CustomHandler) GetHandledCommands() []types.BusinessCommand {
+    return []types.BusinessCommand{
+        types.CmdNewCommand,
+        // 其他该处理器能处理的命令...
+    }
+}
+
+func (handler *CustomHandler) HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse {
+    switch msg.Command {
+    case types.CmdNewCommand:
+        return handler.handleNewCommand(msg)
+    // 其他命令处理...
+    default:
+        return &types.BusinessResponse{
+            RequestID: msg.RequestID,
+            Status:    "error",
+            Error:     fmt.Sprintf("handler cannot handle command: %s", msg.Command),
+            Timestamp: time.Now(),
+        }
+    }
+}
+
+func (handler *CustomHandler) handleNewCommand(msg *types.BusinessMessage) *types.BusinessResponse {
     // 业务规则验证
-    if err := bll.validationManager.ValidateCommand(abstractCmd, params); err != nil {
-        return nil, err
+    if err := handler.validateCommand(msg.Params); err != nil {
+        return &types.BusinessResponse{
+            RequestID: msg.RequestID,
+            Status:    "error",
+            Error:     err.Error(),
+            Timestamp: time.Now(),
+        }
     }
 
     // 安全检查
-    if err := bll.safetyManager.CheckCommandSafety(abstractCmd, params); err != nil {
-        return nil, err
+    if err := handler.safetyManager.CheckSafety(msg.Command, msg.Params); err != nil {
+        return &types.BusinessResponse{
+            RequestID: msg.RequestID,
+            Status:    "error",
+            Error:     err.Error(),
+            Timestamp: time.Now(),
+        }
     }
 
-    // 创建任务
-    task := &types.Task{
-        ID:         generateTaskID(),
-        Type:       types.CommandTypeNewCommand,
-        Priority:   types.PriorityMedium,
-        Parameters: params,
-        CreatedAt:  time.Now(),
-    }
+    // 处理命令并返回响应
+    result := handler.processNewCommand(msg.Params)
 
-    return task, nil
+    return &types.BusinessResponse{
+        RequestID: msg.RequestID,
+        Status:    "success",
+        Data:      result,
+        Timestamp: time.Now(),
+    }
 }
 ```
 
-#### 2.3 注册命令映射
+#### 2.3 注册命令处理器
 
-```yaml
-# 在 config.yaml 中添加
-command_mappings:
-  new_command:
-    abstract_command: new_command
-    description: 新的自定义命令
-    nodes:
-      - id: new-command-step-1
-        type: move_to
-        parameters:
-          device_id: device-1
-          position: 100
-          velocity: 50
-    priority: 2
-    timeout: 30s
+```go
+// 在 ApplicationManager 中注册新的命令处理器
+func (am *ApplicationManager) setupCommandHandlers() {
+    // 注册业务逻辑层处理器
+    am.commandRouter.RegisterHandler(am.businessLogic)
+
+    // 注册配置管理处理器
+    am.commandRouter.RegisterHandler(am.configHandler)
+
+    // 注册自定义命令处理器
+    customHandler := NewCustomHandler(am.logger)
+    am.commandRouter.RegisterHandler(customHandler)
+}
 ```
 
-### 3. 添加新水平层组件
+### 3. 添加新命令处理器
 
-#### 3.1 创建水平层结构
+#### 3.1 创建自定义命令处理器
+
+```go
+// 创建自定义命令处理器，实现 CommandHandler 接口
+type CustomCommandHandler struct {
+    logger *logging.Logger
+    // 其他依赖项...
+}
+
+func NewCustomCommandHandler(logger *logging.Logger) *CustomCommandHandler {
+    return &CustomCommandHandler{
+        logger: logger,
+    }
+}
+
+// 实现 CommandHandler 接口
+func (h *CustomCommandHandler) GetHandledCommands() []types.BusinessCommand {
+    return []types.BusinessCommand{
+        types.CmdNewCommand,
+        types.CmdCustomOperation,
+    }
+}
+
+func (h *CustomCommandHandler) HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse {
+    h.logger.Info("Custom handler processing command", "command", msg.Command, "request_id", msg.RequestID)
+
+    switch msg.Command {
+    case types.CmdNewCommand:
+        return h.handleNewCommand(ctx, msg)
+    case types.CmdCustomOperation:
+        return h.handleCustomOperation(ctx, msg)
+    default:
+        return &types.BusinessResponse{
+            RequestID: msg.RequestID,
+            Status:    "error",
+            Error:     fmt.Sprintf("custom handler cannot handle command: %s", msg.Command),
+            Timestamp: time.Now(),
+        }
+    }
+}
+
+func (h *CustomCommandHandler) GetName() string {
+    return "custom_handler"
+}
+```
+
+#### 3.2 实现具体命令处理逻辑
+
+```go
+func (h *CustomCommandHandler) handleNewCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse {
+    // 验证参数
+    if err := h.validateNewCommandParams(msg.Params); err != nil {
+        return &types.BusinessResponse{
+            RequestID: msg.RequestID,
+            Status:    "error",
+            Error:     err.Error(),
+            Timestamp: time.Now(),
+        }
+    }
+
+    // 处理业务逻辑
+    result, err := h.processNewCommand(ctx, msg.Params)
+    if err != nil {
+        return &types.BusinessResponse{
+            RequestID: msg.RequestID,
+            Status:    "error",
+            Error:     err.Error(),
+            Timestamp: time.Now(),
+        }
+    }
+
+    return &types.BusinessResponse{
+        RequestID: msg.RequestID,
+        Status:    "success",
+        Data:      result,
+        Timestamp: time.Now(),
+    }
+}
+```
+
+### 4. 添加新水平层组件
+
+#### 4.1 创建水平层结构
 
 ```go
 // 在 application/ 目录下创建新的水平层
@@ -383,7 +608,7 @@ func (nhl *NewHorizontalLayer) Stop() error {
 }
 ```
 
-#### 3.2 在应用管理器中集成
+#### 4.2 在应用管理器中集成
 
 ```go
 // 在 application_manager.go 中添加新水平层
@@ -397,9 +622,9 @@ type ApplicationManager struct {
 }
 ```
 
-### 4. 添加新资源类型
+### 5. 添加新资源类型
 
-#### 4.1 定义资源类型
+#### 5.1 定义资源类型
 
 ```go
 // 在 resource_manager.go 中添加
@@ -415,11 +640,7 @@ type NewResource struct {
     Metadata    map[string]interface{}
     Status      ResourceStatus
 }
-```
 
-#### 4.2 实现资源管理逻辑
-
-```go
 func (rm *ResourceManager) AllocateNewResource(resourceID string, metadata map[string]interface{}) error {
     rm.mu.Lock()
     defer rm.mu.Unlock()
@@ -510,61 +731,94 @@ func (tol *TaskOrchestrationLayer) addCustomTrigger() {
 }
 ```
 
-### 6. 添加新的IPC消息处理器
+### 6. 事件驱动命令处理集成
 
-#### 6.1 实现业务逻辑层处理器
+#### 6.1 IPC消息到业务命令的转换
 
 ```go
-// 在 business_logic.go 中添加IPC消息处理
-func (bll *BusinessLogicLayer) handleNewMessage(message types.IPCMessage) {
-    bll.logger.Info("Handling new message", "message_type", message.Type, "source", message.Source)
+// 在 ApplicationManager 中实现IPC消息处理
+func (am *ApplicationManager) handleBusinessCommand(message types.IPCMessage) {
+    am.logger.Info("Received business command", "message", message)
 
-    // 解析消息数据
-    if data, ok := message.Data["command"].(string); ok {
-        abstractCmd := types.AbstractCommand(data)
-        params := message.Data["parameters"].(map[string]interface{})
-
-        // 通过业务逻辑层处理
-        task, err := bll.ExecuteAbstractCommand(abstractCmd, params)
+    go func() {
+        // 解析业务消息
+        businessMsg, err := am.parseBusinessMessage(message)
         if err != nil {
-            bll.logger.Error("Failed to process abstract command", "error", err)
+            am.logger.Error("Failed to parse business message", "error", err)
+            am.sendBusinessErrorResponse(message.Source, "", err.Error())
             return
         }
 
-        // 发送响应
-        response := types.IPCMessage{
-            Type:      "new_message_response",
-            Source:    "business_logic_layer",
-            Target:    message.Source,
-            Data:      map[string]interface{}{
-                "result":   "success",
-                "task_id":  task.ID,
-                "status":   task.Status,
-            },
-            Timestamp: time.Now(),
-            ID:        fmt.Sprintf("msg-%d", time.Now().UnixNano()),
-        }
-
-        // 通过IPC服务器发送响应
-        if ipcServer := bll.getIPCServer(); ipcServer != nil {
-            ipcServer.SendToClient(message.Source, response)
-        }
-    }
+        // 通过命令路由器自动路由到相应的处理器
+        response := am.routeBusinessCommand(businessMsg)
+        am.sendBusinessResponse(message.Source, response)
+    }()
 }
 ```
 
-#### 6.2 在应用管理器中注册
+#### 6.2 业务消息解析
 
 ```go
-// 在 application_manager.go 中添加消息处理注册
-func (am *ApplicationManager) setupMessageHandlers() {
-    // 注册业务逻辑层的消息处理器
-    if am.businessLogic != nil {
-        am.ipcServer.RegisterHandler("new_message", am.businessLogic.handleNewMessage)
-        am.ipcServer.RegisterHandler("abstract_command_request", am.businessLogic.handleAbstractCommandRequest)
+func (am *ApplicationManager) parseBusinessMessage(message types.IPCMessage) (*types.BusinessMessage, error) {
+    if command, ok := message.Data["command"].(string); ok {
+        businessMsg := &types.BusinessMessage{
+            Command:   types.BusinessCommand(command),
+            Source:    message.Source,
+            Target:    message.Target,
+            RequestID: message.ID,
+            Timestamp: time.Now(),
+        }
+
+        if params, ok := message.Data["params"].(map[string]interface{}); ok {
+            businessMsg.Params = params
+        } else {
+            businessMsg.Params = make(map[string]interface{})
+        }
+
+        return businessMsg, nil
     }
 
-    // 注册其他层的消息处理器...
+    return nil, fmt.Errorf("invalid business command format")
+}
+```
+
+#### 6.3 命令路由和响应
+
+```go
+func (am *ApplicationManager) routeBusinessCommand(msg *types.BusinessMessage) *types.BusinessResponse {
+    am.logger.Info("Routing business command through command router", "command", msg.Command)
+    return am.commandRouter.RouteCommand(am.ctx, msg)
+}
+
+func (am *ApplicationManager) sendBusinessResponse(target string, response *types.BusinessResponse) {
+    if target == "" {
+        return
+    }
+
+    ipcServer := am.infrastructure.GetIPCServer()
+    if ipcServer == nil {
+        am.logger.Error("IPC server not available for sending response")
+        return
+    }
+
+    // 将BusinessResponse转换为IPCMessage
+    ipcMessage := types.IPCMessage{
+        Type:   "business_response",
+        Source: "control_system",
+        Target: target,
+        Data: map[string]interface{}{
+            "request_id": response.RequestID,
+            "status":     response.Status,
+            "data":       response.Data,
+            "error":      response.Error,
+        },
+        Timestamp: time.Now(),
+        ID:        fmt.Sprintf("resp-%d", time.Now().UnixNano()),
+    }
+
+    if err := ipcServer.SendToClient(target, ipcMessage); err != nil {
+        am.logger.Error("Failed to send business response", "target", target, "error", err)
+    }
 }
 ```
 
@@ -649,26 +903,50 @@ task_templates:
     timeout: 30s
     priority: 1
 
-# 抽象命令映射配置
-command_mappings:
+# 事件驱动命令系统配置
+command_handlers:
+  business_logic:
+    handler: "business_logic"
+    commands:
+      - query
+      - self_check
+      - emergency_stop
+      - home
+      - initialize
+      - safety_check
+
+  config_handler:
+    handler: "config"
+    commands:
+      - get_config
+      - set_config
+      - list_templates
+
+# 业务命令处理配置
+business_commands:
   emergency_stop:
-    abstract_command: emergency_stop
     description: 急停系统
-    nodes:
-      - id: emergency-stop-motors
-        type: motor_control
-        parameters:
-          action: stop
-          device_id: device-1
-          motor_id: all
     priority: 0
     timeout: 5s
+    handler: "business_logic"
+
   home:
-    abstract_command: home
     description: 回零所有轴
-    template: home_all
     priority: 1
     timeout: 30s
+    handler: "business_logic"
+
+  query:
+    description: 查询系统状态
+    priority: 2
+    timeout: 10s
+    handler: "business_logic"
+
+  get_config:
+    description: 获取系统配置
+    priority: 3
+    timeout: 15s
+    handler: "config_handler"
 ```
 
 ### 2. HAL 配置管理

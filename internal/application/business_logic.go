@@ -3,43 +3,23 @@ package application
 import (
 	"context"
 	"fmt"
+	"time"
 
-	"control/pkg/types"
 	"control/internal/logging"
+	"control/pkg/types"
 )
 
-// BusinessLogicLayer handles high-level business rules, safety, and abstract operations
+// BusinessLogicLayer handles high-level business operations
 type BusinessLogicLayer struct {
 	taskOrchestration *TaskOrchestrationLayer
-	safetyManager     *SafetyManager
-	validationManager *ValidationManager
-	businessRules     *BusinessRules
 	logger            *logging.Logger
 	ctx               context.Context
-}
-
-// SafetyManager handles safety-related operations
-type SafetyManager struct {
-	logger *logging.Logger
-}
-
-// ValidationManager handles input validation and business rule validation
-type ValidationManager struct {
-	logger *logging.Logger
-}
-
-// BusinessRules contains business logic rules and constraints
-type BusinessRules struct {
-	logger *logging.Logger
 }
 
 // NewBusinessLogicLayer creates a new business logic layer
 func NewBusinessLogicLayer(taskOrchestration *TaskOrchestrationLayer) *BusinessLogicLayer {
 	return &BusinessLogicLayer{
 		taskOrchestration: taskOrchestration,
-		safetyManager:     &SafetyManager{logger: logging.GetLogger("safety_manager")},
-		validationManager: &ValidationManager{logger: logging.GetLogger("validation_manager")},
-		businessRules:     &BusinessRules{logger: logging.GetLogger("business_rules")},
 		logger:            logging.GetLogger("business_logic"),
 	}
 }
@@ -48,17 +28,6 @@ func NewBusinessLogicLayer(taskOrchestration *TaskOrchestrationLayer) *BusinessL
 func (bll *BusinessLogicLayer) Start(ctx context.Context) error {
 	bll.ctx = ctx
 	bll.logger.Info("Starting Business Logic Layer")
-
-	// Initialize safety checks
-	if err := bll.initializeSafety(); err != nil {
-		return fmt.Errorf("failed to initialize safety: %w", err)
-	}
-
-	// Initialize business rules
-	if err := bll.initializeBusinessRules(); err != nil {
-		return fmt.Errorf("failed to initialize business rules: %w", err)
-	}
-
 	bll.logger.Info("Business Logic Layer started successfully")
 	return nil
 }
@@ -66,74 +35,86 @@ func (bll *BusinessLogicLayer) Start(ctx context.Context) error {
 // Stop gracefully shuts down the business logic layer
 func (bll *BusinessLogicLayer) Stop() error {
 	bll.logger.Info("Stopping Business Logic Layer")
-
-	// Perform safety cleanup
-	bll.cleanupSafety()
-
 	bll.logger.Info("Business Logic Layer stopped successfully")
 	return nil
 }
 
-// initializeSafety initializes safety systems
-func (bll *BusinessLogicLayer) initializeSafety() error {
-	bll.logger.Info("Initializing safety systems")
-	// Safety system initialization would go here
-	return nil
-}
+// ExecuteBusinessCommand executes a business command
+func (bll *BusinessLogicLayer) ExecuteBusinessCommand(command types.BusinessCommand, params map[string]interface{}) (*types.Task, error) {
+	bll.logger.Info("Executing business command", "command", command)
 
-// initializeBusinessRules initializes business rules
-func (bll *BusinessLogicLayer) initializeBusinessRules() error {
-	bll.logger.Info("Initializing business rules")
-	// Business rules initialization would go here
-	return nil
-}
-
-// cleanupSafety performs safety cleanup
-func (bll *BusinessLogicLayer) cleanupSafety() {
-	bll.logger.Info("Performing safety cleanup")
-}
-
-// ExecuteAbstractCommand executes an abstract command with business logic validation
-func (bll *BusinessLogicLayer) ExecuteAbstractCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) (*types.Task, error) {
-	bll.logger.Info("Executing abstract command with business logic", "command", abstractCmd)
-
-	// Validate input parameters
-	if err := bll.validationManager.ValidateCommand(abstractCmd, params); err != nil {
-		bll.logger.Error("Command validation failed", "command", abstractCmd, "error", err)
-		return nil, fmt.Errorf("command validation failed: %w", err)
+	// Create a simple task based on the business command
+	task := &types.Task{
+		ID:         fmt.Sprintf("business-%s-%d", command, time.Now().UnixNano()),
+		Type:       bll.mapBusinessToCommandType(command),
+		Priority:   bll.mapBusinessToPriority(command),
+		Status:     types.StatusPending,
+		Parameters: params,
+		CreatedAt:  time.Now(),
+		Timeout:    bll.mapBusinessToTimeout(command),
 	}
 
-	// Apply business rules
-	if err := bll.businessRules.ApplyRules(abstractCmd, params); err != nil {
-		bll.logger.Error("Business rules validation failed", "command", abstractCmd, "error", err)
-		return nil, fmt.Errorf("business rules validation failed: %w", err)
-	}
-
-	// Perform safety checks
-	if err := bll.safetyManager.CheckCommandSafety(abstractCmd, params); err != nil {
-		bll.logger.Error("Safety check failed", "command", abstractCmd, "error", err)
-		return nil, fmt.Errorf("safety check failed: %w", err)
-	}
-
-	// Execute through task orchestration
-	task, err := bll.taskOrchestration.ExecuteAbstractCommand(abstractCmd, params)
-	if err != nil {
-		bll.logger.Error("Abstract command execution failed", "command", abstractCmd, "error", err)
+	// Schedule the task through task orchestration
+	if err := bll.taskOrchestration.ScheduleTask(task); err != nil {
+		bll.logger.Error("Failed to schedule business command task", "command", command, "error", err)
 		return nil, err
 	}
 
-	bll.logger.Info("Abstract command executed successfully with business logic", "command", abstractCmd, "task_id", task.ID)
+	bll.logger.Info("Business command executed successfully", "command", command, "task_id", task.ID)
 	return task, nil
+}
+
+// Helper methods to map business commands to internal types
+func (bll *BusinessLogicLayer) mapBusinessToCommandType(cmd types.BusinessCommand) types.CommandType {
+	switch cmd {
+	case types.CmdMove, types.CmdMoveRelative:
+		return types.CommandMoveTo
+	case types.CmdHome:
+		return types.CommandHome
+	case types.CmdEmergencyStop:
+		return types.CommandStop
+	case types.CmdSelfCheck, types.CmdSafetyCheck:
+		return types.CommandDelay
+	default:
+		return types.CommandDelay
+	}
+}
+
+func (bll *BusinessLogicLayer) mapBusinessToPriority(cmd types.BusinessCommand) types.TaskPriority {
+	switch cmd {
+	case types.CmdEmergencyStop:
+		return types.PriorityEmergency
+	case types.CmdSafetyCheck, types.CmdSelfCheck:
+		return types.PriorityHigh
+	case types.CmdHome, types.CmdMove:
+		return types.PriorityMedium
+	default:
+		return types.PriorityLow
+	}
+}
+
+func (bll *BusinessLogicLayer) mapBusinessToTimeout(cmd types.BusinessCommand) time.Duration {
+	switch cmd {
+	case types.CmdEmergencyStop:
+		return 5 * time.Second
+	case types.CmdSafetyCheck, types.CmdSelfCheck:
+		return 15 * time.Second
+	case types.CmdHome:
+		return 30 * time.Second
+	case types.CmdMove:
+		return 60 * time.Second
+	default:
+		return 30 * time.Second
+	}
 }
 
 // SelfCheck performs system self-check
 func (bll *BusinessLogicLayer) SelfCheck() error {
 	bll.logger.Info("Performing system self-check")
 
-	// Execute self-check abstract command
-	_, err := bll.ExecuteAbstractCommand(types.AbstractSelfCheck, map[string]interface{}{
-		"comprehensive": true,
-		"timeout":      30,
+	// Execute self-check business command
+	_, err := bll.ExecuteBusinessCommand(types.CmdSelfCheck, map[string]interface{}{
+		"check_level": "comprehensive",
 	})
 
 	if err != nil {
@@ -149,47 +130,46 @@ func (bll *BusinessLogicLayer) SelfCheck() error {
 func (bll *BusinessLogicLayer) EmergencyStop() error {
 	bll.logger.Warn("Executing emergency stop")
 
-	// Emergency stop has highest priority and bypasses normal validation
-	task, err := bll.taskOrchestration.ExecuteAbstractCommand(types.AbstractEmergencyStop, map[string]interface{}{
-		"immediate": true,
-		"reason":    "emergency_stop_triggered",
+	// Execute emergency stop business command
+	_, err := bll.ExecuteBusinessCommand(types.CmdEmergencyStop, map[string]interface{}{
+		"reason": "emergency_stop_triggered",
 	})
 
 	if err != nil {
-		bll.logger.Error("Emergency stop execution failed", "error", err)
+		bll.logger.Error("Emergency stop failed", "error", err)
 		return fmt.Errorf("emergency stop failed: %w", err)
 	}
 
-	bll.logger.Info("Emergency stop executed successfully", "task_id", task.ID)
+	bll.logger.Info("Emergency stop executed successfully")
 	return nil
 }
 
-// HomeSystem executes system homing sequence
+// HomeSystem homes all axes
 func (bll *BusinessLogicLayer) HomeSystem() error {
-	bll.logger.Info("Executing system homing sequence")
+	bll.logger.Info("Homing system")
 
-	task, err := bll.ExecuteAbstractCommand(types.AbstractHome, map[string]interface{}{
-		"all_axes": true,
-		"timeout":  300,
+	// Execute home business command
+	_, err := bll.ExecuteBusinessCommand(types.CmdHome, map[string]interface{}{
+		"axes": []string{"axis-x", "axis-y", "axis-z"},
+		"mode": "standard",
 	})
 
 	if err != nil {
-		bll.logger.Error("System homing failed", "error", err)
-		return fmt.Errorf("system homing failed: %w", err)
+		bll.logger.Error("Home system failed", "error", err)
+		return fmt.Errorf("home system failed: %w", err)
 	}
 
-	bll.logger.Info("System homing completed successfully", "task_id", task.ID)
+	bll.logger.Info("System home completed successfully")
 	return nil
 }
 
-// InitializeSystem executes system initialization
+// InitializeSystem initializes the system
 func (bll *BusinessLogicLayer) InitializeSystem() error {
-	bll.logger.Info("Executing system initialization")
+	bll.logger.Info("Initializing system")
 
-	task, err := bll.ExecuteAbstractCommand(types.AbstractInitialize, map[string]interface{}{
-		"include_self_check": true,
-		"include_homing":     true,
-		"timeout":           600,
+	// Execute initialize business command
+	_, err := bll.ExecuteBusinessCommand(types.CmdInitialize, map[string]interface{}{
+		"mode": "full_initialization",
 	})
 
 	if err != nil {
@@ -197,7 +177,7 @@ func (bll *BusinessLogicLayer) InitializeSystem() error {
 		return fmt.Errorf("system initialization failed: %w", err)
 	}
 
-	bll.logger.Info("System initialization completed successfully", "task_id", task.ID)
+	bll.logger.Info("System initialized successfully")
 	return nil
 }
 
@@ -205,9 +185,9 @@ func (bll *BusinessLogicLayer) InitializeSystem() error {
 func (bll *BusinessLogicLayer) StartSystem() error {
 	bll.logger.Info("Starting system")
 
-	task, err := bll.ExecuteAbstractCommand(types.AbstractStart, map[string]interface{}{
-		"gradual_start": true,
-		"safety_check":  true,
+	// Execute start business command
+	_, err := bll.ExecuteBusinessCommand(types.CmdInitialize, map[string]interface{}{
+		"mode": "start_system",
 	})
 
 	if err != nil {
@@ -215,7 +195,7 @@ func (bll *BusinessLogicLayer) StartSystem() error {
 		return fmt.Errorf("system start failed: %w", err)
 	}
 
-	bll.logger.Info("System started successfully", "task_id", task.ID)
+	bll.logger.Info("System started successfully")
 	return nil
 }
 
@@ -223,9 +203,9 @@ func (bll *BusinessLogicLayer) StartSystem() error {
 func (bll *BusinessLogicLayer) StopSystem() error {
 	bll.logger.Info("Stopping system")
 
-	task, err := bll.ExecuteAbstractCommand(types.AbstractStop, map[string]interface{}{
-		"graceful": true,
-		"timeout":  60,
+	// Execute stop business command
+	_, err := bll.ExecuteBusinessCommand(types.CmdReset, map[string]interface{}{
+		"mode": "stop_system",
 	})
 
 	if err != nil {
@@ -233,7 +213,7 @@ func (bll *BusinessLogicLayer) StopSystem() error {
 		return fmt.Errorf("system stop failed: %w", err)
 	}
 
-	bll.logger.Info("System stopped successfully", "task_id", task.ID)
+	bll.logger.Info("System stopped successfully")
 	return nil
 }
 
@@ -241,9 +221,9 @@ func (bll *BusinessLogicLayer) StopSystem() error {
 func (bll *BusinessLogicLayer) ResetSystem() error {
 	bll.logger.Info("Resetting system")
 
-	task, err := bll.ExecuteAbstractCommand(types.AbstractReset, map[string]interface{}{
-		"full_reset": true,
-		"clear_errors": true,
+	// Execute reset business command
+	_, err := bll.ExecuteBusinessCommand(types.CmdReset, map[string]interface{}{
+		"mode": "full_reset",
 	})
 
 	if err != nil {
@@ -251,7 +231,7 @@ func (bll *BusinessLogicLayer) ResetSystem() error {
 		return fmt.Errorf("system reset failed: %w", err)
 	}
 
-	bll.logger.Info("System reset successfully", "task_id", task.ID)
+	bll.logger.Info("System reset successfully")
 	return nil
 }
 
@@ -259,9 +239,9 @@ func (bll *BusinessLogicLayer) ResetSystem() error {
 func (bll *BusinessLogicLayer) SafetyCheck() error {
 	bll.logger.Info("Performing safety check")
 
-	task, err := bll.ExecuteAbstractCommand(types.AbstractSafetyCheck, map[string]interface{}{
-		"comprehensive": true,
-		"timeout":      30,
+	// Execute safety check business command
+	_, err := bll.ExecuteBusinessCommand(types.CmdSafetyCheck, map[string]interface{}{
+		"check_type": "full_system",
 	})
 
 	if err != nil {
@@ -269,29 +249,19 @@ func (bll *BusinessLogicLayer) SafetyCheck() error {
 		return fmt.Errorf("safety check failed: %w", err)
 	}
 
-	bll.logger.Info("Safety check completed successfully", "task_id", task.ID)
+	bll.logger.Info("Safety check completed successfully")
 	return nil
 }
 
-// GetSystemStatus returns overall system status
+// GetSystemStatus returns system status
 func (bll *BusinessLogicLayer) GetSystemStatus() (map[string]interface{}, error) {
 	bll.logger.Info("Getting system status")
 
-	// Get device statuses from task orchestration
-	deviceStatuses := bll.taskOrchestration.GetServiceCoordination().GetAllDeviceStatuses()
-
-	// Get task status
-	// This would be enhanced to get actual task statistics
-
 	status := map[string]interface{}{
-		"devices": deviceStatuses,
-		"safety": map[string]interface{}{
-			"status": "normal",
-			"last_check": "recent",
-		},
-		"system": map[string]interface{}{
-			"state": "operational",
-			"mode": "automatic",
+		"system_state": "operational",
+		"timestamp":    time.Now(),
+		"business_logic_layer": map[string]interface{}{
+			"status": "running",
 		},
 	}
 
@@ -299,110 +269,176 @@ func (bll *BusinessLogicLayer) GetSystemStatus() (map[string]interface{}, error)
 	return status, nil
 }
 
-// ValidateCommand validates a command with business rules
-func (bll *BusinessLogicLayer) ValidateCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) error {
-	return bll.validationManager.ValidateCommand(abstractCmd, params)
+// CommandHandler interface implementation
+func (bll *BusinessLogicLayer) GetHandledCommands() []types.BusinessCommand {
+	return []types.BusinessCommand{
+		types.CmdQueryStatus,
+		types.CmdSelfCheck,
+		types.CmdEmergencyStop,
+		types.CmdHome,
+		types.CmdInitialize,
+		types.CmdSafetyCheck,
+	}
 }
 
-// CheckCommandSafety checks command safety
-func (bll *BusinessLogicLayer) CheckCommandSafety(abstractCmd types.AbstractCommand, params map[string]interface{}) error {
-	return bll.safetyManager.CheckCommandSafety(abstractCmd, params)
-}
+func (bll *BusinessLogicLayer) HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse {
+	bll.logger.Info("Business logic layer handling command", "command", msg.Command)
 
-// SafetyManager methods
-func (sm *SafetyManager) CheckCommandSafety(abstractCmd types.AbstractCommand, params map[string]interface{}) error {
-	sm.logger.Info("Checking command safety", "command", abstractCmd)
-
-	// Basic safety checks
-	switch abstractCmd {
-	case types.AbstractEmergencyStop:
-		// Emergency stop is always allowed
-		return nil
-	case types.AbstractStart:
-		// Check if system is safe to start
-		return sm.checkSystemSafetyForStart()
+	switch msg.Command {
+	case types.CmdQueryStatus:
+		return bll.handleQueryStatus(msg)
+	case types.CmdSelfCheck:
+		return bll.handleSelfCheck(msg)
+	case types.CmdEmergencyStop:
+		return bll.handleEmergencyStop(msg)
+	case types.CmdHome:
+		return bll.handleHome(msg)
+	case types.CmdInitialize:
+		return bll.handleInitialize(msg)
+	case types.CmdSafetyCheck:
+		return bll.handleSafetyCheck(msg)
 	default:
-		// Default safety check
-		return sm.checkGeneralSafety()
+		return &types.BusinessResponse{
+			RequestID: msg.RequestID,
+			Status:    "error",
+			Error:     fmt.Sprintf("business logic layer cannot handle command: %s", msg.Command),
+			Timestamp: time.Now(),
+		}
 	}
 }
 
-func (sm *SafetyManager) checkSystemSafetyForStart() error {
-	// Implement safety checks for starting the system
-	sm.logger.Info("Checking system safety for start")
-	return nil
+func (bll *BusinessLogicLayer) GetName() string {
+	return "business_logic"
 }
 
-func (sm *SafetyManager) checkGeneralSafety() error {
-	// Implement general safety checks
-	sm.logger.Info("Checking general safety")
-	return nil
-}
-
-// ValidationManager methods
-func (vm *ValidationManager) ValidateCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) error {
-	vm.logger.Info("Validating command", "command", abstractCmd)
-
-	// Basic parameter validation
-	if params == nil {
-		return fmt.Errorf("parameters cannot be nil")
+// Command handling methods
+func (bll *BusinessLogicLayer) handleQueryStatus(msg *types.BusinessMessage) *types.BusinessResponse {
+	status, err := bll.GetSystemStatus()
+	if err != nil {
+		return &types.BusinessResponse{
+			RequestID: msg.RequestID,
+			Status:    "error",
+			Error:     err.Error(),
+			Timestamp: time.Now(),
+		}
 	}
 
-	// Command-specific validation
-	switch abstractCmd {
-	case types.AbstractEmergencyStop:
-		return vm.validateEmergencyStopParams(params)
-	case types.AbstractStart:
-		return vm.validateStartParams(params)
-	default:
-		return vm.validateGeneralParams(params)
+	return &types.BusinessResponse{
+		RequestID: msg.RequestID,
+		Status:    "success",
+		Data: map[string]interface{}{
+			"system_status": status,
+		},
+		Timestamp: time.Now(),
 	}
 }
 
-func (vm *ValidationManager) validateEmergencyStopParams(params map[string]interface{}) error {
-	// Emergency stop has minimal parameter requirements
-	return nil
-}
+func (bll *BusinessLogicLayer) handleSelfCheck(msg *types.BusinessMessage) *types.BusinessResponse {
+	task, err := bll.ExecuteBusinessCommand(types.CmdSelfCheck, msg.Params)
+	if err != nil {
+		return &types.BusinessResponse{
+			RequestID: msg.RequestID,
+			Status:    "error",
+			Error:     err.Error(),
+			Timestamp: time.Now(),
+		}
+	}
 
-func (vm *ValidationManager) validateStartParams(params map[string]interface{}) error {
-	// Validate start parameters
-	return nil
-}
-
-func (vm *ValidationManager) validateGeneralParams(params map[string]interface{}) error {
-	// General parameter validation
-	return nil
-}
-
-// BusinessRules methods
-func (br *BusinessRules) ApplyRules(abstractCmd types.AbstractCommand, params map[string]interface{}) error {
-	br.logger.Info("Applying business rules", "command", abstractCmd)
-
-	// Apply business rules based on command type
-	switch abstractCmd {
-	case types.AbstractStart:
-		return br.applyStartRules(params)
-	case types.AbstractStop:
-		return br.applyStopRules(params)
-	default:
-		return br.applyGeneralRules(params)
+	return &types.BusinessResponse{
+		RequestID: msg.RequestID,
+		Status:    "success",
+		Data: map[string]interface{}{
+			"task_id":    task.ID,
+			"task_status": task.Status,
+		},
+		Timestamp: time.Now(),
 	}
 }
 
-func (br *BusinessRules) applyStartRules(params map[string]interface{}) error {
-	br.logger.Info("Applying start rules")
-	// Implement start-specific business rules
-	return nil
+func (bll *BusinessLogicLayer) handleEmergencyStop(msg *types.BusinessMessage) *types.BusinessResponse {
+	task, err := bll.ExecuteBusinessCommand(types.CmdEmergencyStop, msg.Params)
+	if err != nil {
+		return &types.BusinessResponse{
+			RequestID: msg.RequestID,
+			Status:    "error",
+			Error:     err.Error(),
+			Timestamp: time.Now(),
+		}
+	}
+
+	return &types.BusinessResponse{
+		RequestID: msg.RequestID,
+		Status:    "success",
+		Data: map[string]interface{}{
+			"task_id":    task.ID,
+			"task_status": task.Status,
+		},
+		Timestamp: time.Now(),
+	}
 }
 
-func (br *BusinessRules) applyStopRules(params map[string]interface{}) error {
-	br.logger.Info("Applying stop rules")
-	// Implement stop-specific business rules
-	return nil
+func (bll *BusinessLogicLayer) handleHome(msg *types.BusinessMessage) *types.BusinessResponse {
+	task, err := bll.ExecuteBusinessCommand(types.CmdHome, msg.Params)
+	if err != nil {
+		return &types.BusinessResponse{
+			RequestID: msg.RequestID,
+			Status:    "error",
+			Error:     err.Error(),
+			Timestamp: time.Now(),
+		}
+	}
+
+	return &types.BusinessResponse{
+		RequestID: msg.RequestID,
+		Status:    "success",
+		Data: map[string]interface{}{
+			"task_id":    task.ID,
+			"task_status": task.Status,
+		},
+		Timestamp: time.Now(),
+	}
 }
 
-func (br *BusinessRules) applyGeneralRules(params map[string]interface{}) error {
-	br.logger.Info("Applying general rules")
-	// Implement general business rules
-	return nil
+func (bll *BusinessLogicLayer) handleInitialize(msg *types.BusinessMessage) *types.BusinessResponse {
+	task, err := bll.ExecuteBusinessCommand(types.CmdInitialize, msg.Params)
+	if err != nil {
+		return &types.BusinessResponse{
+			RequestID: msg.RequestID,
+			Status:    "error",
+			Error:     err.Error(),
+			Timestamp: time.Now(),
+		}
+	}
+
+	return &types.BusinessResponse{
+		RequestID: msg.RequestID,
+		Status:    "success",
+		Data: map[string]interface{}{
+			"task_id":    task.ID,
+			"task_status": task.Status,
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+func (bll *BusinessLogicLayer) handleSafetyCheck(msg *types.BusinessMessage) *types.BusinessResponse {
+	task, err := bll.ExecuteBusinessCommand(types.CmdSafetyCheck, msg.Params)
+	if err != nil {
+		return &types.BusinessResponse{
+			RequestID: msg.RequestID,
+			Status:    "error",
+			Error:     err.Error(),
+			Timestamp: time.Now(),
+		}
+	}
+
+	return &types.BusinessResponse{
+		RequestID: msg.RequestID,
+		Status:    "success",
+		Data: map[string]interface{}{
+			"task_id":    task.ID,
+			"task_status": task.Status,
+		},
+		Timestamp: time.Now(),
+	}
 }
