@@ -2,15 +2,14 @@ package management
 
 import (
 	"context"
-	"fmt"
-	"time"
-
+	"control/internal/application"
 	"control/internal/core"
 	"control/internal/hal"
-	"control/internal/application"
 	"control/internal/ipc"
 	"control/internal/logging"
 	"control/pkg/types"
+	"fmt"
+	"time"
 )
 
 // ApplicationManager 管理应用层组件，现在包含多个水平子层
@@ -18,14 +17,14 @@ type ApplicationManager struct {
 	infrastructure *InfrastructureManager
 
 	// 水平分层架构
-	hal                *hal.HardwareAbstractionLayer
+	hal                 *hal.HardwareAbstractionLayer
 	serviceCoordination *application.ServiceCoordinationLayer
-	taskOrchestration  *application.TaskOrchestrationLayer
-	businessLogic      *application.BusinessLogicLayer
+	taskOrchestration   *application.TaskOrchestrationLayer
+	businessLogic       *application.BusinessLogicLayer
 
 	// 命令路由系统
-	commandRouter      *core.CommandRouter
-	configHandler      *ConfigHandler
+	commandRouter *core.CommandRouter
+	configHandler *ConfigHandler
 
 	logger *logging.Logger
 	ctx    context.Context
@@ -62,7 +61,6 @@ func NewApplicationManager(infrastructure *InfrastructureManager, systemConfig t
 	am.logger.Info("ApplicationManager created with complete horizontal layer architecture and command routing")
 	return am, nil
 }
-
 
 // SetupDependencies 设置组件间依赖关系，现在包括新的水平分层架构
 func (am *ApplicationManager) SetupDependencies() error {
@@ -244,8 +242,6 @@ func (am *ApplicationManager) processTask(task *types.Task) {
 	}
 }
 
-
-
 // handleBusinessCommand 处理新的简化业务命令
 func (am *ApplicationManager) handleBusinessCommand(message types.IPCMessage) {
 	am.logger.Info("Received business command", "message", message)
@@ -296,7 +292,6 @@ func (am *ApplicationManager) routeBusinessCommand(msg *types.BusinessMessage) *
 	return am.commandRouter.RouteCommand(am.ctx, msg)
 }
 
-
 // sendBusinessResponse 发送业务响应
 func (am *ApplicationManager) sendBusinessResponse(target string, response *types.BusinessResponse) {
 	if target == "" {
@@ -311,9 +306,9 @@ func (am *ApplicationManager) sendBusinessResponse(target string, response *type
 
 	// 将BusinessResponse转换为IPCMessage
 	ipcMessage := types.IPCMessage{
-		Type:      "business_response",
-		Source:    "control_system",
-		Target:    target,
+		Type:   "business_response",
+		Source: "control_system",
+		Target: target,
 		Data: map[string]interface{}{
 			"request_id": response.RequestID,
 			"status":     response.Status,
@@ -339,7 +334,6 @@ func (am *ApplicationManager) sendBusinessErrorResponse(target, requestID, error
 	}
 	am.sendBusinessResponse(target, response)
 }
-
 
 // 新增：获取各层的访问方法
 func (am *ApplicationManager) GetHAL() *hal.HardwareAbstractionLayer {
