@@ -2,91 +2,92 @@
 
 A comprehensive Go-based motion control core system designed for industrial automation and robotics applications.
 
-## Architecture
+## Quick Start
 
-The system implements a modular, layered architecture:
-
-```
-┌──────────────────────┐
-│      GUI Client      │ ←→ IPC ↔
-├──────────────────────┤
-│      Event Loop      │
-├──────────────────────┤
-│     Task Trigger     │
-├──────────────────────┤
-│ Task Dispatch & Scheduler │
-├──────────────────────┤
-│    Task Decomposer   │
-├──────────────────────┤
-│    Execution Queue   │
-├──────────────────────┤
-│   Command Executor   │
-├──────────────────────┤
-│   Device Interface   │
-└──────────────────────┘
-```
-
-## Key Features
-
-- **Multi-protocol Device Support**: Mock, Modbus, and extensible protocol adapters
-- **Real-time Task Scheduling**: Priority-based, preemptive task scheduling
-- **Trajectory Planning**: Linear, circular, and point-to-point motion planning
-- **IPC Communication**: TCP-based client-server architecture
-- **Configuration Management**: YAML-based configuration with hot-reload
-- **Safety Features**: Position limits, velocity constraints, and emergency handling
-
-## Building
-
+### Build
 ```bash
-# Build both control and simulator
-go build ./cmd/control
-go build ./cmd/simulator
+# Recommended: Use build script
+go run build.go
 
-# Or build with output directory
+# Manual build
 mkdir -p bin
 go build -o bin/control ./cmd/control
 go build -o bin/simulator ./cmd/simulator
 ```
 
-## Running
-
-### Control System
+### Run
 ```bash
-# Run with default configuration
+# Control system
 ./bin/control
 
-# Run with custom configuration
+# Simulator (connects to localhost:8080)
+./bin/simulator
+
+# With custom config
 ./bin/control -config /path/to/config.yaml
 ```
 
-### Simulator
-```bash
-# Run simulator connecting to localhost:8080
-./bin/simulator
+## Architecture
 
-# Connect to different address/port
-./bin/simulator -address 192.168.1.100 -port 8080
+Four-layer modular architecture with event-driven command processing:
+
 ```
+┌─────────────────────────────────┐
+│        External Clients         │
+└─────────────┬───────────────────┘
+              │ TCP (Business Commands)
+              ▼
+┌─────────────────────────────────┐
+│      Coordination Layer        │
+│   Event Loop + Management       │
+└─────────────┬───────────────────┘
+              │ System Events
+              ▼
+┌─────────────────────────────────┐
+│     Infrastructure Layer       │
+│ Config + Device + IPC Manager  │
+└─────────────┬───────────────────┘
+              │ Event-Driven Commands
+              ▼
+┌─────────────────────────────────┐
+│      Application Layer         │
+│  Business → Task → Service → HAL│
+└─────────────┬───────────────────┘
+              │ Hardware Commands
+              ▼
+┌─────────────────────────────────┐
+│        Physical Devices         │
+└─────────────────────────────────┘
+```
+
+## Key Features
+
+- **Event-Driven Architecture**: CommandRouter with subscription-based command handling
+- **Multi-Protocol Support**: Mock, Modbus, and extensible protocol adapters via HAL
+- **Real-Time Scheduling**: Priority-based preemptive task scheduling
+- **Hardware Abstraction**: Unified HAL interface for diverse hardware devices
+- **Safety-First Design**: Multi-layer safety checks and emergency handling
+- **Hot Configuration**: YAML-based configuration with runtime updates
 
 ## Configuration
 
-The system uses YAML configuration files. A default configuration will be created if none exists:
+Basic `config.yaml` structure:
 
 ```yaml
 event_loop_interval: 10ms
-queue_size: 1000
 ipc:
   type: tcp
   address: 127.0.0.1
   port: 8080
   timeout: 5s
-  buffer_size: 1024
+
 devices:
   device-1:
     type: controller
     protocol: mock
     endpoint: mock://device-1
     timeout: 10s
+
 axes:
   axis-x:
     device_id: device-1
@@ -98,98 +99,26 @@ axes:
     units: mm
 ```
 
-## Protocol Support
+## High-Level Commands
 
-### Mock Device
-- Simulated device for testing
-- No external dependencies
-- Supports all basic motion commands
+Event-driven system supports abstract commands:
 
-### Modbus Device
-- Modbus TCP/RTU support
-- Register mapping for position/velocity control
-- Configurable endpoint and timeout
+- **System Control**: `self_check`, `initialize_system`, `start_system`, `stop_system`
+- **Safety Operations**: `emergency_stop`, `safety_check`
+- **Motion Control**: `home_system`, `move_to`, `move_relative`
+- **Configuration**: `get_config`, `set_config`, `list_templates`
 
-### Extending
-Add new protocols by implementing the `Device` interface:
+## Documentation
 
-```go
-type CustomDevice struct {
-    // device-specific fields
-}
+- **[Architecture](docs/architecture.md)** - Complete system architecture and design patterns
+- **[Development Guide](docs/development.md)** - Development setup and contribution guidelines
+- **[Data Flow](docs/data-flow.md)** - Event-driven data flow and state management
 
-func (d *CustomDevice) Write(cmd types.MotionCommand) error {
-    // implementation
-}
+## Dependencies
 
-func (d *CustomDevice) Read(reg string) (interface{}, error) {
-    // implementation
-}
-
-// Other required methods...
-```
-
-## IPC Messages
-
-The system supports various message types:
-
-- `task_request`: Submit new motion tasks
-- `status_request`: Query system status
-- `config_update`: Update configuration
-- `task_response`: Task execution feedback
-- `status_response`: System status information
-
-## Safety Features
-
-- **Position Limits**: Configurable min/max positions per axis
-- **Velocity Constraints**: Maximum velocity and acceleration limits
-- **Emergency Stop**: Immediate halt capability
-- **Timeout Handling**: Configurable timeouts for all operations
-- **Error Recovery**: Graceful error handling and reporting
-
-## Development
-
-### Project Structure
-```
-control/
-├── cmd/                    # Executable applications
-│   ├── control/           # Main control system
-│   └── simulator/         # Test simulator
-├── internal/              # Internal packages
-│   ├── core/              # Core system components
-│   ├── device/            # Device implementations
-│   ├── ipc/               # Communication layer
-│   └── config/            # Configuration management
-├── pkg/                   # Public packages
-│   └── types/             # Common types and interfaces
-├── bin/                   # Compiled binaries
-└── config.yaml           # Configuration file
-```
-
-### Testing
-```bash
-# Run all tests
-go test ./...
-
-# Run tests with coverage
-go test -cover ./...
-
-# Run specific package tests
-go test ./internal/core
-```
-
-### Dependencies
-- Go 1.19+
-- gopkg.in/yaml.v3 (for configuration)
-
-## Contributing
-
-1. Follow Go standard formatting
-2. Add comprehensive tests for new features
-3. Update documentation
-4. Ensure all existing tests pass
-5. Follow the established architectural patterns
+- Go 1.21+
+- gopkg.in/yaml.v3
 
 ## License
 
-This project is open source and available under the MIT License.
+MIT License

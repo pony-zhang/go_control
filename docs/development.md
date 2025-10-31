@@ -1,277 +1,102 @@
-# 开发指南
+# Development Guide
 
-## 开发环境设置
+## Environment Setup
 
-### 1. 系统要求
-
+### Requirements
 - Go 1.21+
 - Git
-- Make (可选)
-- Docker (可选，用于容器化部署)
 
-### 2. 项目结构
-
+### Project Structure
 ```
 control/
-├── cmd/                    # 应用程序入口
-│   ├── control/           # 控制系统主程序
-│   └── simulator/         # 模拟器程序
-├── internal/              # 内部包
-│   ├── core/              # 核心系统组件
-│   ├── device/            # 设备实现
-│   ├── hardware/          # 硬件抽象层
-│   ├── hal/               # 硬件抽象层实现
-│   ├── application/       # 应用层水平子层
-│   ├── management/        # 分层管理器
-│   ├── ipc/               # 进程间通信
-│   ├── config/            # 配置管理
-│   └── logging/           # 日志系统
-├── pkg/                   # 公共包
-│   └── types/             # 类型定义
-├── docs/                  # 文档
-├── config.yaml           # 配置文件
-├── go.mod                # Go模块定义
-└── Makefile              # 构建脚本
+├── cmd/                    # Application entry points
+│   ├── control/           # Main control system
+│   └── simulator/         # Test simulator
+├── internal/              # Internal packages
+│   ├── core/              # Core system components
+│   ├── device/            # Device implementations
+│   ├── hal/               # Hardware Abstraction Layer
+│   ├── application/       # Application horizontal layers
+│   ├── management/        # Layer managers
+│   ├── ipc/               # Inter-process communication
+│   ├── config/            # Configuration management
+│   └── logging/           # Logging system
+├── pkg/                   # Public packages
+│   └── types/             # Type definitions
+└── config.yaml           # Configuration file
 ```
 
-### 3. 依赖管理
-
+### Build & Run
 ```bash
-# 初始化模块
-go mod tidy
+# Build (recommended)
+go run build.go
 
-# 添加依赖
-go get github.com/example/package
-
-# 更新依赖
-go get -u github.com/example/package
-```
-
-## 构建和运行
-
-### 1. 本地构建
-
-```bash
-# 构建所有组件
-make build
-
-# 或者手动构建
-go build ./cmd/control
-go build ./cmd/simulator
-
-# 构建到指定目录
+# Manual build
 mkdir -p bin
 go build -o bin/control ./cmd/control
 go build -o bin/simulator ./cmd/simulator
-```
 
-### 2. 运行系统
-
-```bash
-# 运行控制系统
+# Run
 ./bin/control
-
-# 运行模拟器
 ./bin/simulator
 
-# 指定配置文件
-./bin/control -config /path/to/config.yaml
-```
-
-### 3. 测试
-
-```bash
-# 运行所有测试
+# Test
 go test ./...
-
-# 运行特定包测试
-go test ./internal/core
-go test ./internal/device
-
-# 运行测试并显示覆盖率
 go test -cover ./...
-
-# 运行测试并生成覆盖率报告
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out -o coverage.html
 ```
 
-## 核心开发概念
+## Core Concepts
 
-### 1. 分层架构
+### Event-Driven Command Processing
 
-系统采用四层主架构，应用层包含四个水平子层，并实现了事件驱动的命令处理系统：
-
-```
-协调层 (Coordination Layer)
-    ↓
-管理层 (Management Layer)
-    ↓
-基础设施层 (Infrastructure Layer)
-    ↓
-应用层 (Application Layer)
-    ├── 业务逻辑层 (Business Logic Layer)
-    ├── 任务编排层 (Task Orchestration Layer)
-    ├── 服务协调层 (Service Coordination Layer)
-    └── 硬件抽象层 (Hardware Abstraction Layer)
-    ↓
-物理层 (Physical Layer)
-
-事件驱动命令系统:
-    ├── CommandRouter: 命令路由器
-    ├── CommandHandler: 命令处理器接口
-    ├── BusinessCommand: 简化业务命令类型
-    └── 事件订阅分发机制
-```
-
-### 2. 模块接口
-
-所有核心模块都必须实现 `Module` 接口：
+The system uses an event-driven architecture with CommandRouter and CommandHandler interfaces:
 
 ```go
-type Module interface {
-    EventHandler                    // 事件处理器接口
-    Start(ctx context.Context) error // 启动模块
-    Stop() error                     // 停止模块
-    Status() interface{}             // 状态信息
-}
-
-type EventHandler interface {
-    HandleEvent(event Event) error    // 处理事件
-    GetSubscribedEvents() []EventType // 获取订阅的事件类型
-    Name() string                     // 处理器名称
-}
-```
-
-**事件驱动架构说明**：
-- 模块不再使用定时轮询的 `Process()` 方法
-- 改为事件驱动的 `HandleEvent()` 方法
-- 模块通过 `GetSubscribedEvents()` 声明感兴趣的事件类型
-- EventLoop根据事件类型自动分发到相应的处理器
-
-### 3. 事件驱动命令处理
-
-#### 3.1 CommandHandler 接口
-
-```go
+// CommandHandler - Modular command processing interface
 type CommandHandler interface {
-    // GetHandledCommands 返回该处理器能处理的命令列表
     GetHandledCommands() []types.BusinessCommand
-
-    // HandleCommand 处理业务命令并返回响应
     HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse
-
-    // GetName 返回处理器名称，用于日志记录
     GetName() string
 }
-```
 
-#### 3.2 CommandRouter 命令路由器
-
-```go
+// CommandRouter - Intelligent command routing
 type CommandRouter struct {
     handlers map[types.BusinessCommand]CommandHandler
-    logger   Logger
 }
 
-// RegisterHandler 注册命令处理器
-func (cr *CommandRouter) RegisterHandler(handler CommandHandler) {
-    for _, cmd := range handler.GetHandledCommands() {
-        cr.handlers[cmd] = handler
-        cr.logger.Info("Registered command handler", "command", cmd, "handler", handler.GetName())
-    }
-}
-
-// RouteCommand 路由命令到相应的处理器
 func (cr *CommandRouter) RouteCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse {
     handler, exists := cr.handlers[msg.Command]
     if !exists {
-        return &types.BusinessResponse{
-            RequestID: msg.RequestID,
-            Status:    "error",
-            Error:     fmt.Sprintf("no handler registered for command: %s", msg.Command),
-            Timestamp: time.Now(),
-        }
+        return createErrorResponse(msg, "no handler registered")
     }
     return handler.HandleCommand(ctx, msg)
 }
 ```
 
-#### 3.3 BusinessCommand 类型
+### Business Commands
+
+High-level abstract commands that the system supports:
 
 ```go
-type BusinessCommand string
-
 const (
     CmdQueryStatus     BusinessCommand = "query"
-    CmdMove            BusinessCommand = "move"
-    CmdHome            BusinessCommand = "home"
     CmdEmergencyStop   BusinessCommand = "stop"
+    CmdHome            BusinessCommand = "home"
     CmdInitialize      BusinessCommand = "initialize"
     CmdSelfCheck       BusinessCommand = "self_check"
     CmdSafetyCheck     BusinessCommand = "safety_check"
+    CmdMove            BusinessCommand = "move"
     CmdGetConfig       BusinessCommand = "get_config"
     CmdSetConfig       BusinessCommand = "set_config"
-    CmdListTemplates   BusinessCommand = "list_templates"
 )
 ```
 
-#### 3.4 命令处理器实现示例
+### Hardware Abstraction Layer (HAL)
+
+HAL provides unified interface for diverse hardware:
 
 ```go
-// BusinessLogicLayer 实现 CommandHandler
-func (bll *BusinessLogicLayer) GetHandledCommands() []types.BusinessCommand {
-    return []types.BusinessCommand{
-        types.CmdQueryStatus,
-        types.CmdSelfCheck,
-        types.CmdEmergencyStop,
-        types.CmdHome,
-        types.CmdInitialize,
-        types.CmdSafetyCheck,
-    }
-}
-
-func (bll *BusinessLogicLayer) HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse {
-    switch msg.Command {
-    case types.CmdQueryStatus:
-        return bll.handleQueryStatus(msg)
-    case types.CmdSelfCheck:
-        return bll.handleSelfCheck(msg)
-    case types.CmdEmergencyStop:
-        return bll.handleEmergencyStop(msg)
-    // ... 其他命令处理
-    default:
-        return &types.BusinessResponse{
-            RequestID: msg.RequestID,
-            Status:    "error",
-            Error:     fmt.Sprintf("business logic layer cannot handle command: %s", msg.Command),
-            Timestamp: time.Now(),
-        }
-    }
-}
-```
-
-### 3. 设备接口
-
-设备实现必须实现 `Device` 接口：
-
-```go
-type Device interface {
-    Write(cmd types.MotionCommand) error // 写入命令
-    Read(reg string) (interface{}, error) // 读取寄存器
-    Connect() error                     // 连接设备
-    Disconnect()                        // 断开连接
-    Status() types.DeviceStatus         // 设备状态
-    ID() types.DeviceID                 // 设备ID
-    Type() string                       // 设备类型
-}
-```
-
-### 4. HAL 协议接口
-
-HAL 协议必须实现 `Protocol` 接口：
-
-```go
+// Protocol interface for hardware communication
 type Protocol interface {
     Name() string
     Start(ctx context.Context) error
@@ -284,42 +109,214 @@ type Protocol interface {
 }
 ```
 
-### 5. 任务生命周期
+## Adding New Features
+
+### 1. Adding New Commands
 
 ```go
-type TaskStatus int
-
+// 1. Define command type
 const (
-    StatusPending TaskStatus = iota   // 待处理
-    StatusScheduled                  // 已调度
-    StatusDecomposing                // 分解中
-    StatusExecuting                  // 执行中
-    StatusCompleted                  // 已完成
-    StatusFailed                     // 失败
-    StatusCancelled                  // 已取消
+    CmdNewCommand BusinessCommand = "new_command"
 )
+
+// 2. Implement CommandHandler
+type CustomHandler struct {
+    logger *logging.Logger
+}
+
+func (h *CustomHandler) GetHandledCommands() []types.BusinessCommand {
+    return []types.BusinessCommand{types.CmdNewCommand}
+}
+
+func (h *CustomHandler) HandleCommand(ctx context.Context, msg *types.BusinessMessage) *types.BusinessResponse {
+    // Handle command logic
+    return &types.BusinessResponse{
+        RequestID: msg.RequestID,
+        Status:    "success",
+        Data:      result,
+        Timestamp: time.Now(),
+    }
+}
+
+// 3. Register handler
+commandRouter.RegisterHandler(customHandler)
 ```
 
-### 7. 水平层通信模式
-
-应用层各水平子层通过标准化接口通信，并集成了事件驱动命令处理：
+### 2. Adding New Protocols
 
 ```go
-// 业务逻辑层 → 任务编排层
-func (bll *BusinessLogicLayer) ExecuteAbstractCommand(abstractCmd types.AbstractCommand, params map[string]interface{}) (*types.Task, error)
+// 1. Implement Protocol interface
+type NewProtocol struct {
+    devices map[types.DeviceID]*Device
+    logger  *logging.Logger
+}
 
-// 任务编排层 → 服务协调层
-func (tol *TaskOrchestrationLayer) ExecuteCommand(ctx context.Context, cmd types.MotionCommand) error
+func (p *NewProtocol) Write(deviceID types.DeviceID, cmd types.MotionCommand) error {
+    // Protocol-specific implementation
+    return nil
+}
 
-// 服务协调层 → 硬件抽象层
-func (scl *ServiceCoordinationLayer) ExecuteCommand(ctx context.Context, cmd types.MotionCommand) error
+// 2. Register protocol
+protocolManager.Register("new_protocol", &NewProtocol{})
+```
 
-// 事件驱动命令处理
-func (am *ApplicationManager) routeBusinessCommand(msg *types.BusinessMessage) *types.BusinessResponse {
-    am.logger.Info("Routing business command through command router", "command", msg.Command)
-    return am.commandRouter.RouteCommand(am.ctx, msg)
+### 3. Configuration
+
+```yaml
+# System configuration
+event_loop_interval: 10ms
+queue_size: 1000
+
+# IPC configuration
+ipc:
+  type: tcp
+  address: 127.0.0.1
+  port: 8080
+  timeout: 5s
+
+# Device configuration
+devices:
+  device-1:
+    type: controller
+    protocol: modbus
+    endpoint: tcp://192.168.1.100:502
+
+# Axis configuration
+axes:
+  axis-x:
+    device_id: device-1
+    max_velocity: 100.0
+    max_acceleration: 50.0
+    min_position: -1000.0
+    max_position: 1000.0
+    units: mm
+```
+
+## Testing
+
+### Unit Tests
+```go
+func TestCommandHandler(t *testing.T) {
+    handler := NewCustomHandler(testLogger)
+
+    msg := &types.BusinessMessage{
+        Command:   types.CmdNewCommand,
+        RequestID: "test-123",
+        Params:    map[string]interface{}{"param": "value"},
+    }
+
+    response := handler.HandleCommand(context.Background(), msg)
+
+    assert.Equal(t, "success", response.Status)
+    assert.Equal(t, "test-123", response.RequestID)
 }
 ```
+
+### Integration Tests
+```go
+func TestSystemIntegration(t *testing.T) {
+    // Test complete command flow
+    system := NewTestSystem(t)
+    defer system.Stop()
+
+    response := system.SendCommand(types.CmdEmergencyStop, nil)
+    assert.Equal(t, "success", response.Status)
+}
+```
+
+## Debugging
+
+### Structured Logging
+```go
+logger := logging.GetLogger("component_name")
+logger.Info("Processing command",
+    "command", cmd,
+    "device_id", deviceID,
+    "request_id", requestID)
+```
+
+### Status Monitoring
+```bash
+# Query system status
+echo '{"command": "query"}' | nc localhost 8080
+
+# Monitor logs
+./bin/control -log-level debug
+```
+
+## Best Practices
+
+### Error Handling
+```go
+func (h *Handler) ProcessCommand(ctx context.Context, cmd Command) error {
+    if err := validateCommand(cmd); err != nil {
+        return fmt.Errorf("validation failed: %w", err)
+    }
+
+    result, err := h.executeCommand(ctx, cmd)
+    if err != nil {
+        h.logger.Error("Command execution failed",
+            "command", cmd,
+            "error", err)
+        return fmt.Errorf("execution failed: %w", err)
+    }
+
+    return nil
+}
+```
+
+### Resource Management
+```go
+func (m *Manager) Start(ctx context.Context) error {
+    m.ctx = ctx
+
+    // Start resources
+    if err := m.startResources(); err != nil {
+        return fmt.Errorf("failed to start resources: %w", err)
+    }
+
+    // Handle shutdown
+    go func() {
+        <-ctx.Done()
+        m.cleanup()
+    }()
+
+    return nil
+}
+```
+
+## Contributing
+
+1. **Code Style**: Follow Go standard formatting
+2. **Testing**: Add comprehensive tests for new features
+3. **Documentation**: Update relevant documentation
+4. **PR Process**:
+   - Fork the project
+   - Create feature branch
+   - Add tests and documentation
+   - Submit PR for review
+
+## Troubleshooting
+
+### Common Issues
+- **Build failures**: Check Go version and dependencies
+- **Connection errors**: Verify network configuration and firewall
+- **Protocol issues**: Check device configuration and endpoint
+- **Performance**: Monitor system metrics and adjust configuration
+
+### Debug Commands
+```bash
+# Check system status
+go run ./cmd/control -status
+
+# Run with debug logging
+go run ./cmd/control -log-level debug
+
+# Test configuration
+go run ./cmd/control -config-check
+```
+
+For detailed architecture information, see [architecture.md](./architecture.md).
 
 ## 添加新功能
 
