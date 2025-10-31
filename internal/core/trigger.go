@@ -135,34 +135,63 @@ func (tt *TaskTrigger) ValidateTrigger(task *types.Task) error {
 		return fmt.Errorf("task type cannot be empty")
 	}
 
-	if len(task.Axes) == 0 {
-		return fmt.Errorf("task must specify at least one axis")
+	if task.DeviceGroup == "" {
+		return fmt.Errorf("task must specify a device group")
+	}
+
+	if len(task.Dimensions) == 0 {
+		return fmt.Errorf("task must specify at least one dimension")
 	}
 
 	if task.Timeout == 0 {
 		task.Timeout = 30 * time.Second
 	}
 
-	for _, axisID := range task.Axes {
-		axisConfig, exists := tt.config.Axes[types.AxisID(axisID)]
+	// Validate device group exists
+	deviceGroup, exists := tt.config.DeviceGroups[task.DeviceGroup]
+	if !exists {
+		return fmt.Errorf("device group %s not found in configuration", task.DeviceGroup)
+	}
+
+	// Validate dimensions exist in device group
+	for _, dimName := range task.Dimensions {
+		dimConfig, exists := deviceGroup.Dimensions[dimName]
 		if !exists {
-			return fmt.Errorf("axis %s not found in configuration", axisID)
+			return fmt.Errorf("dimension %s not found in device group %s", dimName, task.DeviceGroup)
 		}
 
-		if task.Target.X < axisConfig.MinPosition || task.Target.X > axisConfig.MaxPosition {
-			return fmt.Errorf("target X position %f is out of bounds for axis %s", task.Target.X, axisID)
+		// Validate position constraints for absolute moves
+		if task.Type == types.CommandMoveTo {
+			targetValue := tt.getTargetValueForDimension(task.Target, dimName)
+			if targetValue < dimConfig.MinValue || targetValue > dimConfig.MaxValue {
+				return fmt.Errorf("target position %f for dimension %s is out of bounds [%f, %f]",
+					targetValue, dimName, dimConfig.MinValue, dimConfig.MaxValue)
+			}
 		}
 
-		if task.Target.Y < axisConfig.MinPosition || task.Target.Y > axisConfig.MaxPosition {
-			return fmt.Errorf("target Y position %f is out of bounds for axis %s", task.Target.Y, axisID)
-		}
-
-		if task.Velocity.Linear > axisConfig.MaxVelocity {
-			return fmt.Errorf("velocity %f exceeds maximum for axis %s", task.Velocity.Linear, axisID)
+		// Validate velocity constraints
+		if task.Velocity.Linear > dimConfig.MaxVelocity {
+			return fmt.Errorf("velocity %f exceeds maximum %f for dimension %s in device group %s",
+				task.Velocity.Linear, dimConfig.MaxVelocity, dimName, task.DeviceGroup)
 		}
 	}
 
 	return nil
+}
+
+// getTargetValueForDimension extracts the target value for a specific dimension
+func (tt *TaskTrigger) getTargetValueForDimension(target types.Point, dimName string) float64 {
+	switch dimName {
+	case "X", "x":
+		return target.X
+	case "Y", "y":
+		return target.Y
+	case "Z", "z":
+		return target.Z
+	default:
+		// For custom dimensions, you might need a more sophisticated mapping
+		return target.X // Default fallback
+	}
 }
 
 func (tt *TaskTrigger) GetTaskChannel() <-chan *types.Task {

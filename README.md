@@ -118,7 +118,3 @@ Event-driven system supports abstract commands:
 
 - Go 1.21+
 - gopkg.in/yaml.v3
-
-## License
-
-MIT License

@@ -222,15 +222,22 @@ func (mcs *MotionControlSystem) printSystemInfo() {
 	fmt.Printf("  Queue Size: %d\n", config.QueueSize)
 	fmt.Printf("  IPC Server: %s:%d\n", config.IPC.Address, config.IPC.Port)
 	fmt.Printf("  Devices: %d\n", len(config.Devices))
-	fmt.Printf("  Axes: %d\n", len(config.Axes))
+	fmt.Printf("  Device Groups: %d\n", len(config.DeviceGroups))
 	fmt.Println("==========================================")
 
 	for deviceID, deviceConfig := range config.Devices {
 		fmt.Printf("  Device %s: %s (%s)\n", deviceID, deviceConfig.Type, deviceConfig.Protocol)
 	}
 
-	for axisID, axisConfig := range config.Axes {
-		fmt.Printf("  Axis %s: %s [%.1f, %.1f]\n", axisID, axisConfig.DeviceID, axisConfig.MinPosition, axisConfig.MaxPosition)
+	for groupID, groupConfig := range config.DeviceGroups {
+		fmt.Printf("  Device Group %s: %s (%d devices, %d dimensions)\n",
+			groupID, groupConfig.Name, len(groupConfig.DeviceIDs), len(groupConfig.Dimensions))
+
+		for dimName, dimConfig := range groupConfig.Dimensions {
+			fmt.Printf("    Dimension %s: %s [%.1f, %.1f] v=%.1f a=%.1f\n",
+				dimName, dimConfig.Type, dimConfig.MinValue, dimConfig.MaxValue,
+				dimConfig.MaxVelocity, dimConfig.MaxAccel)
+		}
 	}
 
 	fmt.Println("==========================================")

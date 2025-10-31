@@ -135,21 +135,25 @@ type ConditionCommand struct {
 }
 
 type Task struct {
-	ID          string
-	Type        CommandType
-	Priority    TaskPriority
-	Status      TaskStatus
-	RootNode    TaskNode
-	Target      Point
-	Velocity    Velocity
-	Axes        []AxisID
-	Parameters  map[string]interface{}
-	CreatedAt   time.Time
-	StartedAt   *time.Time
-	CompletedAt *time.Time
-	Error       string
-	Timeout     time.Duration
-	CancelFunc  context.CancelFunc
+	ID            string
+	Type          CommandType
+	Priority      TaskPriority
+	Status        TaskStatus
+	RootNode      TaskNode
+	Target        Point
+	Velocity      Velocity
+	// Remove: Axes []AxisID - replaced with abstract fields
+	DeviceGroup   string                `json:"device_group"`   // Device group identifier
+	MotionSpace   MotionSpaceConfig     `json:"motion_space"`   // Motion space configuration
+	Dimensions    []string              `json:"dimensions"`     // Target dimensions to move
+	WorkSpace     string                `json:"workspace"`      // Workspace identifier
+	Parameters    map[string]interface{} `json:"parameters"`
+	CreatedAt     time.Time
+	StartedAt     *time.Time
+	CompletedAt   *time.Time
+	Error         string
+	Timeout       time.Duration
+	CancelFunc    context.CancelFunc
 }
 
 type MotionCommand struct {
@@ -188,7 +192,7 @@ type SystemConfig struct {
 	EventLoopInterval time.Duration                `yaml:"event_loop_interval"`
 	QueueSize         int                          `yaml:"queue_size"`
 	Devices           map[DeviceID]DeviceConfig    `yaml:"devices"`
-	Axes              map[AxisID]AxisConfig        `yaml:"axes"`
+	DeviceGroups      map[string]DeviceGroupConfig `yaml:"device_groups"`
 	Safety            SafetyConfig                 `yaml:"safety"`
 	IPC               IPCConfig                    `yaml:"ipc"`
 	TaskTemplates     map[string]TaskTemplate      `yaml:"task_templates"`
@@ -204,6 +208,60 @@ type DeviceConfig struct {
 	RetryCount int               `yaml:"retry_count"`
 }
 
+// DeviceGroupConfig represents a group of devices that work together
+type DeviceGroupConfig struct {
+	Name        string                    `yaml:"name"`
+	Description string                    `yaml:"description"`
+	DeviceIDs   []DeviceID                `yaml:"device_ids"`
+	Dimensions  map[string]DimensionConfig `yaml:"dimensions"`
+	Kinematics  KinematicsConfig          `yaml:"kinematics"`
+	Capabilities map[string]interface{}   `yaml:"capabilities"`
+}
+
+// DimensionConfig defines a single dimension of motion
+type DimensionConfig struct {
+	Name         string  `yaml:"name"`         // Dimension name (e.g., "X", "Y", "Z", "Theta")
+	Type         string  `yaml:"type"`         // "linear", "angular", "rotary"
+	MinValue     float64 `yaml:"min_value"`    // Minimum value
+	MaxValue     float64 `yaml:"max_value"`    // Maximum value
+	HomeValue    float64 `yaml:"home_value"`   // Home/reference value
+	MaxVelocity  float64 `yaml:"max_velocity"` // Maximum velocity
+	MaxAccel     float64 `yaml:"max_accel"`    // Maximum acceleration
+	Units        string  `yaml:"units"`        // Units (mm, deg, rad, etc.)
+	Invert       bool    `yaml:"invert"`       // Invert direction
+}
+
+// KinematicsConfig defines the kinematic properties of a device group
+type KinematicsConfig struct {
+	Type         string                 `yaml:"type"`         // "cartesian", "cylindrical", "joint", "custom"
+	Workspace    WorkspaceConfig        `yaml:"workspace"`    // Workspace definition
+	Transforms   map[string]interface{} `yaml:"transforms"`   // Coordinate transforms
+	Constraints  map[string]interface{} `yaml:"constraints"`  // Motion constraints
+}
+
+// WorkspaceConfig defines the workspace boundaries
+type WorkspaceConfig struct {
+	Shape       string                 `yaml:"shape"`       // "box", "cylinder", "sphere", "custom"
+	Dimensions  map[string]float64     `yaml:"dimensions"`  // Shape dimensions
+	Constraints map[string]interface{} `yaml:"constraints"` // Additional constraints
+}
+
+// MotionSpaceConfig defines the abstract motion space for tasks
+type MotionSpaceConfig struct {
+	SpaceType    string                    `yaml:"space_type"`    // Motion space type
+	Dimensions   []DimensionConfig         `yaml:"dimensions"`    // Dimension configurations
+	Constraints  map[string]interface{}    `yaml:"constraints"`   // Motion constraints
+	Coordinates  CoordinateSystemConfig    `yaml:"coordinates"`   // Coordinate system
+}
+
+// CoordinateSystemConfig defines the coordinate system
+type CoordinateSystemConfig struct {
+	Type        string                 `yaml:"type"`        // "world", "tool", "joint", "custom"
+	Reference   string                 `yaml:"reference"`   // Reference frame
+	Orientation map[string]interface{} `yaml:"orientation"` // Orientation definition
+}
+
+// Legacy AxisConfig for backward compatibility
 type AxisConfig struct {
 	DeviceID         DeviceID  `yaml:"device_id"`
 	MaxVelocity      float64   `yaml:"max_velocity"`

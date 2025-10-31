@@ -116,12 +116,30 @@ func (tnd *TaskNodeDecomposer) decomposeMotionNode(ctx context.Context, node typ
 		task.Velocity = types.Velocity{Linear: linear, Angular: angular}
 	}
 
-	if axes, ok := params["axes"].([]interface{}); ok {
-		for _, axis := range axes {
-			if axis != nil {
-				task.Axes = append(task.Axes, types.AxisID(axis.(string)))
+	// Get device group from parameters or use default
+	if deviceGroup, ok := params["device_group"].(string); ok && deviceGroup != "" {
+		task.DeviceGroup = deviceGroup
+	} else {
+		task.DeviceGroup = "main_workspace" // Default device group
+	}
+
+	// Get dimensions from parameters or use default
+	if dimensions, ok := params["dimensions"].([]interface{}); ok {
+		for _, dim := range dimensions {
+			if dim != nil {
+				task.Dimensions = append(task.Dimensions, dim.(string))
 			}
 		}
+	} else {
+		// Default to X, Y, Z dimensions for backward compatibility
+		task.Dimensions = []string{"X", "Y", "Z"}
+	}
+
+	// Get workspace from parameters or use default
+	if workspace, ok := params["workspace"].(string); ok && workspace != "" {
+		task.WorkSpace = workspace
+	} else {
+		task.WorkSpace = "default" // Default workspace
 	}
 
 	switch node.GetType() {
@@ -364,125 +382,139 @@ func (tnd *TaskNodeDecomposer) decomposeConditionNode(ctx context.Context, node 
 }
 
 func (tnd *TaskNodeDecomposer) decomposeMoveTo(task *types.Task) []types.MotionCommand {
-	commands := make([]types.MotionCommand, 0)
-
-	for _, axisID := range task.Axes {
-		axisConfig, exists := tnd.config.Axes[axisID]
-		if !exists {
-			continue
-		}
-
-		accel := types.Velocity{
-			Linear:  axisConfig.MaxAcceleration,
-			Angular: 0,
-		}
-
-		cmd := types.MotionCommand{
-			DeviceID:     axisConfig.DeviceID,
-			CommandType:  task.Type,
-			Position:     task.Target,
-			Velocity:     task.Velocity,
-			Acceleration: accel,
-			Timestamp:    time.Now(),
-		}
-		commands = append(commands, cmd)
-	}
-
-	return commands
+	return tnd.decomposeMotionCommand(task)
 }
 
 func (tnd *TaskNodeDecomposer) decomposeMoveRelative(task *types.Task) []types.MotionCommand {
-	commands := make([]types.MotionCommand, 0)
-
-	for _, axisID := range task.Axes {
-		axisConfig, exists := tnd.config.Axes[axisID]
-		if !exists {
-			continue
-		}
-
-		accel := types.Velocity{
-			Linear:  axisConfig.MaxAcceleration,
-			Angular: 0,
-		}
-
-		cmd := types.MotionCommand{
-			DeviceID:     axisConfig.DeviceID,
-			CommandType:  task.Type,
-			Position:     task.Target,
-			Velocity:     task.Velocity,
-			Acceleration: accel,
-			Timestamp:    time.Now(),
-		}
-		commands = append(commands, cmd)
-	}
-
-	return commands
+	return tnd.decomposeMotionCommand(task)
 }
 
 func (tnd *TaskNodeDecomposer) decomposeHome(task *types.Task) []types.MotionCommand {
-	commands := make([]types.MotionCommand, 0)
-
-	for _, axisID := range task.Axes {
-		axisConfig, exists := tnd.config.Axes[axisID]
-		if !exists {
-			continue
-		}
-
-		cmd := types.MotionCommand{
-			DeviceID:     axisConfig.DeviceID,
-			CommandType:  types.CommandHome,
-			Position:     types.Point{X: axisConfig.HomePosition, Y: 0, Z: 0},
-			Velocity:     types.Velocity{Linear: axisConfig.MaxVelocity * 0.5, Angular: 0},
-			Acceleration: types.Velocity{Linear: axisConfig.MaxAcceleration * 0.5, Angular: 0},
-		}
-		commands = append(commands, cmd)
-	}
-
-	return commands
+	return tnd.decomposeMotionCommand(task)
 }
 
 func (tnd *TaskNodeDecomposer) decomposeStop(task *types.Task) []types.MotionCommand {
+	return tnd.decomposeMotionCommand(task)
+}
+
+func (tnd *TaskNodeDecomposer) decomposeJog(task *types.Task) []types.MotionCommand {
+	return tnd.decomposeMotionCommand(task)
+}
+
+// decomposeMotionCommand is the unified method for decomposing motion commands
+func (tnd *TaskNodeDecomposer) decomposeMotionCommand(task *types.Task) []types.MotionCommand {
 	commands := make([]types.MotionCommand, 0)
 
-	for _, axisID := range task.Axes {
-		axisConfig, exists := tnd.config.Axes[axisID]
+	// Get device group configuration
+	deviceGroup, exists := tnd.config.DeviceGroups[task.DeviceGroup]
+	if !exists {
+		// Return empty commands if device group not found
+		return commands
+	}
+
+	// Generate commands for each dimension
+	for _, dimName := range task.Dimensions {
+		dimConfig, exists := deviceGroup.Dimensions[dimName]
 		if !exists {
 			continue
 		}
 
-		cmd := types.MotionCommand{
-			DeviceID:     axisConfig.DeviceID,
-			CommandType:  types.CommandStop,
-			Position:     types.Point{},
-			Velocity:     types.Velocity{Linear: 0, Angular: 0},
-			Acceleration: types.Velocity{Linear: 0, Angular: 0},
+		// For each device in the device group, generate commands
+		for _, deviceID := range deviceGroup.DeviceIDs {
+			if _, deviceExists := tnd.devices[deviceID]; deviceExists {
+				cmd := tnd.createMotionCommand(task, deviceID, dimName, dimConfig)
+				commands = append(commands, cmd)
+			}
 		}
-		commands = append(commands, cmd)
 	}
 
 	return commands
 }
 
-func (tnd *TaskNodeDecomposer) decomposeJog(task *types.Task) []types.MotionCommand {
-	commands := make([]types.MotionCommand, 0)
-
-	for _, axisID := range task.Axes {
-		axisConfig, exists := tnd.config.Axes[axisID]
-		if !exists {
-			continue
-		}
-
-		cmd := types.MotionCommand{
-			DeviceID:     axisConfig.DeviceID,
-			CommandType:  types.CommandJog,
-			Position:     task.Target,
-			Velocity:     task.Velocity,
-			Acceleration: types.Velocity{Linear: axisConfig.MaxAcceleration, Angular: 0},
-		}
-		commands = append(commands, cmd)
+// createMotionCommand creates a motion command for a specific device and dimension
+func (tnd *TaskNodeDecomposer) createMotionCommand(task *types.Task, deviceID types.DeviceID, dimName string, dimConfig types.DimensionConfig) types.MotionCommand {
+	cmd := types.MotionCommand{
+		DeviceID:     deviceID,
+		CommandType:  task.Type,
+		Position:     tnd.createTargetPosition(task, dimName),
+		Velocity:     tnd.createTargetVelocity(task, dimConfig),
+		Acceleration: types.Velocity{Linear: dimConfig.MaxAccel, Angular: 0},
+		Timestamp:    time.Now(),
+		Timeout:     task.Timeout,
 	}
 
-	return commands
+	// Special handling for home command
+	if task.Type == types.CommandHome {
+		cmd.Position = tnd.createHomePosition(dimName, dimConfig)
+		cmd.Velocity = types.Velocity{
+			Linear:  dimConfig.MaxVelocity * 0.5,
+			Angular: 0,
+		}
+		cmd.Acceleration = types.Velocity{
+			Linear:  dimConfig.MaxAccel * 0.5,
+			Angular: 0,
+		}
+	}
+
+	// Special handling for stop command
+	if task.Type == types.CommandStop {
+		cmd.Position = types.Point{}
+		cmd.Velocity = types.Velocity{Linear: 0, Angular: 0}
+		cmd.Acceleration = types.Velocity{Linear: 0, Angular: 0}
+	}
+
+	return cmd
+}
+
+// createTargetPosition creates the target position for a specific dimension
+func (tnd *TaskNodeDecomposer) createTargetPosition(task *types.Task, dimName string) types.Point {
+	switch dimName {
+	case "X", "x":
+		return types.Point{X: task.Target.X, Y: 0, Z: 0}
+	case "Y", "y":
+		return types.Point{X: 0, Y: task.Target.Y, Z: 0}
+	case "Z", "z":
+		return types.Point{X: 0, Y: 0, Z: task.Target.Z}
+	default:
+		// For custom dimensions, use X as default with dimension-specific mapping
+		return tnd.mapDimensionToPoint(task.Target, dimName)
+	}
+}
+
+// createHomePosition creates the home position for a specific dimension
+func (tnd *TaskNodeDecomposer) createHomePosition(dimName string, dimConfig types.DimensionConfig) types.Point {
+	switch dimName {
+	case "X", "x":
+		return types.Point{X: dimConfig.HomeValue, Y: 0, Z: 0}
+	case "Y", "y":
+		return types.Point{X: 0, Y: dimConfig.HomeValue, Z: 0}
+	case "Z", "z":
+		return types.Point{X: 0, Y: 0, Z: dimConfig.HomeValue}
+	default:
+		// For custom dimensions, use X as default
+		return types.Point{X: dimConfig.HomeValue, Y: 0, Z: 0}
+	}
+}
+
+// createTargetVelocity creates the target velocity respecting dimension constraints
+func (tnd *TaskNodeDecomposer) createTargetVelocity(task *types.Task, dimConfig types.DimensionConfig) types.Velocity {
+	// Clamp velocity to dimension maximum
+	maxVelocity := task.Velocity.Linear
+	if maxVelocity > dimConfig.MaxVelocity {
+		maxVelocity = dimConfig.MaxVelocity
+	}
+
+	return types.Velocity{
+		Linear:  maxVelocity,
+		Angular: task.Velocity.Angular, // TODO: Handle angular velocity for rotary dimensions
+	}
+}
+
+// mapDimensionToPoint maps a custom dimension to a point
+func (tnd *TaskNodeDecomposer) mapDimensionToPoint(target types.Point, dimName string) types.Point {
+	// This is a simplified mapping - in a real implementation,
+	// you might have a more sophisticated mapping based on dimension type
+	return types.Point{X: target.X, Y: 0, Z: 0}
 }
 
 func (tnd *TaskNodeDecomposer) ValidateTaskNode(node types.TaskNode) error {
