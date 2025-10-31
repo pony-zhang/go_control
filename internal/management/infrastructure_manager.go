@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"control/internal/config"
-	"control/internal/device"
+	"control/internal/hardware"
 	"control/internal/ipc"
 	"control/internal/logging"
 	"control/pkg/types"
@@ -13,11 +13,11 @@ import (
 
 // InfrastructureManager 管理基础设施层组件
 type InfrastructureManager struct {
-	configManager *config.ConfigManager
-	deviceManager  *device.DeviceManager
-	ipcServer      *ipc.IPCServer
-	logger         *logging.Logger
-	ctx            context.Context
+	configManager   *config.ConfigManager
+	hardwareFactory *hardware.HardwareFactory
+	ipcServer       *ipc.IPCServer
+	logger          *logging.Logger
+	ctx             context.Context
 }
 
 // NewInfrastructureManager 创建基础设施管理器
@@ -36,8 +36,8 @@ func NewInfrastructureManager(configPath string, systemConfig types.SystemConfig
 		}
 	}
 
-	// 2. 创建设备管理器 (依赖配置)
-	im.deviceManager = device.NewDeviceManager(systemConfig)
+	// 2. 创建硬件工厂 (直接使用HAL)
+	im.hardwareFactory = hardware.NewHardwareFactory()
 
 	// 3. 创建IPC服务器 (依赖配置)
 	im.ipcServer = ipc.NewIPCServer(systemConfig.IPC)
@@ -50,9 +50,9 @@ func (im *InfrastructureManager) GetConfigManager() *config.ConfigManager {
 	return im.configManager
 }
 
-// GetDeviceManager 获取设备管理器
-func (im *InfrastructureManager) GetDeviceManager() *device.DeviceManager {
-	return im.deviceManager
+// GetHardwareFactory 获取硬件工厂
+func (im *InfrastructureManager) GetHardwareFactory() *hardware.HardwareFactory {
+	return im.hardwareFactory
 }
 
 // GetIPCServer 获取IPC服务器
@@ -70,11 +70,12 @@ func (im *InfrastructureManager) Start(ctx context.Context) error {
 	im.ctx = ctx
 	im.logger.Info("Starting infrastructure layer")
 
-	// 启动顺序: 配置 -> 设备 -> IPC
-	if err := im.deviceManager.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start device manager: %w", err)
+	// 启动硬件抽象层
+	if err := im.hardwareFactory.Start(); err != nil {
+		im.logger.Warn("Failed to start hardware factory", "error", err)
 	}
 
+	// 启动IPC服务器
 	if err := im.ipcServer.Start(); err != nil {
 		return fmt.Errorf("failed to start IPC server: %w", err)
 	}
@@ -101,9 +102,9 @@ func (im *InfrastructureManager) Stop() error {
 		}
 	}
 
-	if im.deviceManager != nil {
-		if err := im.deviceManager.Stop(); err != nil {
-			errs = append(errs, fmt.Errorf("device manager stop error: %w", err))
+	if im.hardwareFactory != nil {
+		if err := im.hardwareFactory.Stop(); err != nil {
+			errs = append(errs, fmt.Errorf("hardware factory stop error: %w", err))
 		}
 	}
 
