@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"control/pkg/types"
 	"control/internal/core"
 	"control/internal/hardware"
 	"control/internal/logging"
+	"control/pkg/types"
 )
 
 type BaseDevice struct {
@@ -72,16 +72,10 @@ func (bd *BaseDevice) SetConnected(connected bool) {
 	bd.status.LastSeen = time.Now()
 }
 
-// MockDevice removed - virtual devices are deprecated, use real hardware devices or proper testing frameworks
-
-// ModbusDevice removed - virtual Modbus implementation is deprecated, use real hardware devices from HAL
-
-// ModbusClient removed - virtual Modbus client implementation is deprecated, use real hardware devices from HAL
-
 // HardwareDevice wraps the new hardware abstraction layer for compatibility
 type HardwareDevice struct {
 	*BaseDevice
-	config       types.DeviceConfig
+	config      types.DeviceConfig
 	hardwareMgr *hardware.HardwareFactory
 	hwDeviceID  string
 }
@@ -246,14 +240,14 @@ func (hd *HardwareDevice) updateStatus(cmd types.MotionCommand) {
 }
 
 type DeviceManager struct {
-	devices       map[types.DeviceID]core.Device
-	devicesLock   sync.RWMutex
-	config        types.SystemConfig
-	hardwareMgr   *hardware.HardwareFactory
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	logger        *logging.Logger
+	devices     map[types.DeviceID]core.Device
+	devicesLock sync.RWMutex
+	config      types.SystemConfig
+	hardwareMgr *hardware.HardwareFactory
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	logger      *logging.Logger
 }
 
 func NewDeviceManager(config types.SystemConfig) *DeviceManager {
