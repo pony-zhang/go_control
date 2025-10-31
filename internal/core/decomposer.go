@@ -189,6 +189,16 @@ func (p *SimpleTrajectoryPlanner) PlanPointToPoint(start, end types.Point, veloc
 	return trajectory, nil
 }
 
+// MotionPlan represents an abstract motion plan
+type MotionPlan struct {
+	Type         types.CommandType
+	Dimensions   []string                // Target dimensions
+	Trajectories map[string][]TrajectoryPoint // Dimension -> trajectory points
+	Constraints  map[string]interface{}  // Motion constraints
+	Workspace    string                  // Workspace identifier
+}
+
+// TaskDecomposer handles task decomposition with abstract motion planning
 type TaskDecomposer struct {
 	planner  TrajectoryPlanner
 	config   types.SystemConfig
@@ -206,23 +216,25 @@ func (td *TaskDecomposer) Decompose(task *types.Task) ([]types.MotionCommand, er
 		return nil, fmt.Errorf("task validation failed: %w", err)
 	}
 
-	var commands []types.MotionCommand
-
-	switch task.Type {
-	case types.CommandMoveTo:
-		commands = td.decomposeMoveTo(task)
-	case types.CommandMoveRelative:
-		commands = td.decomposeMoveRelative(task)
-	case types.CommandHome:
-		commands = td.decomposeHome(task)
-	case types.CommandStop:
-		commands = td.decomposeStop(task)
-	case types.CommandJog:
-		commands = td.decomposeJog(task)
-	default:
-		return nil, fmt.Errorf("unsupported task type: %s", task.Type)
+	// Get device group configuration
+	deviceGroup, err := td.getDeviceGroupConfig(task.DeviceGroup)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get device group config: %w", err)
 	}
 
+	// Plan motion based on motion space and device group
+	motionPlan, err := td.planMotion(task, deviceGroup)
+	if err != nil {
+		return nil, fmt.Errorf("failed to plan motion: %w", err)
+	}
+
+	// Generate commands from motion plan
+	commands, err := td.generateCommands(motionPlan, deviceGroup)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate commands: %w", err)
+	}
+
+	// Set command metadata
 	for i := range commands {
 		commands[i].ID = fmt.Sprintf("%s-cmd-%d", task.ID, i)
 		commands[i].Timestamp = time.Now()
@@ -232,153 +244,236 @@ func (td *TaskDecomposer) Decompose(task *types.Task) ([]types.MotionCommand, er
 	return commands, nil
 }
 
-func (td *TaskDecomposer) decomposeMoveTo(task *types.Task) []types.MotionCommand {
-	commands := make([]types.MotionCommand, 0)
+// Helper methods for the new decomposition approach
 
-	for _, axisID := range task.Axes {
-		axisConfig, exists := td.config.Axes[axisID]
+// getDeviceGroupConfig retrieves device group configuration
+func (td *TaskDecomposer) getDeviceGroupConfig(groupID string) (types.DeviceGroupConfig, error) {
+	if groupID == "" {
+		return types.DeviceGroupConfig{}, fmt.Errorf("device group ID cannot be empty")
+	}
+
+	deviceGroup, exists := td.config.DeviceGroups[groupID]
+	if !exists {
+		return types.DeviceGroupConfig{}, fmt.Errorf("device group %s not found", groupID)
+	}
+
+	return deviceGroup, nil
+}
+
+// planMotion creates an abstract motion plan based on task and device group
+func (td *TaskDecomposer) planMotion(task *types.Task, deviceGroup types.DeviceGroupConfig) (*MotionPlan, error) {
+	plan := &MotionPlan{
+		Type:         task.Type,
+		Dimensions:   task.Dimensions,
+		Constraints:  deviceGroup.Kinematics.Constraints,
+		Workspace:    task.WorkSpace,
+		Trajectories: make(map[string][]TrajectoryPoint),
+	}
+
+	// Validate dimensions exist in device group
+	for _, dimName := range task.Dimensions {
+		dimConfig, exists := deviceGroup.Dimensions[dimName]
+		if !exists {
+			return nil, fmt.Errorf("dimension %s not found in device group %s", dimName, task.DeviceGroup)
+		}
+
+		// Plan trajectory for this dimension
+		trajectory, err := td.planDimensionTrajectory(task, dimName, dimConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to plan trajectory for dimension %s: %w", dimName, err)
+		}
+
+		plan.Trajectories[dimName] = trajectory
+	}
+
+	return plan, nil
+}
+
+// planDimensionTrajectory plans trajectory for a single dimension
+func (td *TaskDecomposer) planDimensionTrajectory(task *types.Task, dimName string, dimConfig types.DimensionConfig) ([]TrajectoryPoint, error) {
+	accel := types.Velocity{
+		Linear:  dimConfig.MaxAccel,
+		Angular: 0, // TODO: Handle angular acceleration for rotary dimensions
+	}
+
+	var trajectory []TrajectoryPoint
+	var err error
+
+	switch task.Type {
+	case types.CommandMoveTo:
+		trajectory, err = td.planLinearMove(task, dimName, dimConfig, accel)
+	case types.CommandMoveRelative:
+		trajectory, err = td.planRelativeMove(task, dimName, dimConfig, accel)
+	case types.CommandHome:
+		trajectory, err = td.planHomeMove(task, dimName, dimConfig, accel)
+	case types.CommandJog:
+		trajectory, err = td.planJogMove(task, dimName, dimConfig, accel)
+	default:
+		return nil, fmt.Errorf("unsupported command type: %s", task.Type)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return trajectory, nil
+}
+
+// planLinearMove plans a linear move to absolute position
+func (td *TaskDecomposer) planLinearMove(task *types.Task, dimName string, dimConfig types.DimensionConfig, accel types.Velocity) ([]TrajectoryPoint, error) {
+	// Get target value based on dimension
+	targetValue := td.getTargetValueForDimension(task.Target, dimName)
+	if targetValue < dimConfig.MinValue || targetValue > dimConfig.MaxValue {
+		return nil, fmt.Errorf("target value %f for dimension %s is out of range [%f, %f]",
+			targetValue, dimName, dimConfig.MinValue, dimConfig.MaxValue)
+	}
+
+	start := types.Point{X: 0, Y: 0, Z: 0}
+	end := td.createPointForDimension(targetValue, dimName)
+
+	// Use dimension-specific velocity
+	dimVelocity := task.Velocity.Linear
+	if dimVelocity > dimConfig.MaxVelocity {
+		dimVelocity = dimConfig.MaxVelocity
+	}
+
+	velocity := types.Velocity{Linear: dimVelocity, Angular: 0}
+
+	return td.planner.PlanPointToPoint(start, end, velocity, accel)
+}
+
+// planRelativeMove plans a relative move
+func (td *TaskDecomposer) planRelativeMove(task *types.Task, dimName string, dimConfig types.DimensionConfig, accel types.Velocity) ([]TrajectoryPoint, error) {
+	relativeValue := td.getTargetValueForDimension(task.Target, dimName)
+	if math.Abs(relativeValue) > (dimConfig.MaxValue - dimConfig.MinValue) {
+		return nil, fmt.Errorf("relative move %f for dimension %s exceeds range", relativeValue, dimName)
+	}
+
+	start := types.Point{X: 0, Y: 0, Z: 0}
+	end := td.createPointForDimension(relativeValue, dimName)
+
+	// Use dimension-specific velocity
+	dimVelocity := task.Velocity.Linear
+	if dimVelocity > dimConfig.MaxVelocity {
+		dimVelocity = dimConfig.MaxVelocity
+	}
+
+	velocity := types.Velocity{Linear: dimVelocity, Angular: 0}
+
+	return td.planner.PlanLinear(start, end, velocity, accel)
+}
+
+// planHomeMove plans a home move
+func (td *TaskDecomposer) planHomeMove(task *types.Task, dimName string, dimConfig types.DimensionConfig, accel types.Velocity) ([]TrajectoryPoint, error) {
+	end := td.createPointForDimension(dimConfig.HomeValue, dimName)
+	start := types.Point{X: 0, Y: 0, Z: 0}
+
+	// Use reduced velocity for homing
+	velocity := types.Velocity{
+		Linear:  dimConfig.MaxVelocity * 0.5,
+		Angular: 0,
+	}
+
+	// Use reduced acceleration for homing
+	homeAccel := types.Velocity{
+		Linear:  dimConfig.MaxAccel * 0.5,
+		Angular: 0,
+	}
+
+	return td.planner.PlanPointToPoint(start, end, velocity, homeAccel)
+}
+
+// planJogMove plans a jog move (continuous movement)
+func (td *TaskDecomposer) planJogMove(task *types.Task, dimName string, dimConfig types.DimensionConfig, accel types.Velocity) ([]TrajectoryPoint, error) {
+	// For jog, create a single point representing the continuous motion
+	jogValue := td.getTargetValueForDimension(task.Target, dimName)
+	point := td.createPointForDimension(jogValue, dimName)
+
+	return []TrajectoryPoint{{
+		Position:  point,
+		Velocity:  task.Velocity,
+		Timestamp: time.Now(),
+	}}, nil
+}
+
+// generateCommands converts motion plan to device-specific commands
+func (td *TaskDecomposer) generateCommands(plan *MotionPlan, deviceGroup types.DeviceGroupConfig) ([]types.MotionCommand, error) {
+	var commands []types.MotionCommand
+
+	// For each device in the group, generate commands for assigned dimensions
+	for _, deviceID := range deviceGroup.DeviceIDs {
+		deviceCommands, err := td.generateCommandsForDevice(plan, deviceID, deviceGroup)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate commands for device %s: %w", deviceID, err)
+		}
+		commands = append(commands, deviceCommands...)
+	}
+
+	return commands, nil
+}
+
+// generateCommandsForDevice generates commands for a specific device
+func (td *TaskDecomposer) generateCommandsForDevice(plan *MotionPlan, deviceID types.DeviceID, deviceGroup types.DeviceGroupConfig) ([]types.MotionCommand, error) {
+	var commands []types.MotionCommand
+
+	// Find dimensions assigned to this device
+	// Note: In a real implementation, you'd need a mapping from dimensions to devices
+	// For now, we'll assume all dimensions are handled by all devices in the group
+	for dimName, trajectory := range plan.Trajectories {
+		dimConfig, exists := deviceGroup.Dimensions[dimName]
 		if !exists {
 			continue
 		}
 
-		accel := types.Velocity{
-			Linear:  axisConfig.MaxAcceleration,
-			Angular: 0,
-		}
-
-		trajectory, err := td.plannerPlanForAxis(task, axisID, accel)
-		if err != nil {
-			continue
-		}
-
+		// Convert trajectory points to motion commands
 		for _, point := range trajectory {
 			cmd := types.MotionCommand{
-				DeviceID:    axisConfig.DeviceID,
-				CommandType: task.Type,
-				Position:    point.Position,
-				Velocity:    point.Velocity,
-				Acceleration: accel,
-				Timestamp:   point.Timestamp,
+				DeviceID:     deviceID,
+				CommandType:  plan.Type,
+				Position:     point.Position,
+				Velocity:     point.Velocity,
+				Acceleration: types.Velocity{Linear: dimConfig.MaxAccel, Angular: 0},
+				Timestamp:    point.Timestamp,
 			}
 			commands = append(commands, cmd)
 		}
 	}
 
-	return commands
+	return commands, nil
 }
 
-func (td *TaskDecomposer) decomposeMoveRelative(task *types.Task) []types.MotionCommand {
-	commands := make([]types.MotionCommand, 0)
+// Utility methods
 
-	for _, axisID := range task.Axes {
-		axisConfig, exists := td.config.Axes[axisID]
-		if !exists {
-			continue
-		}
-
-		accel := types.Velocity{
-			Linear:  axisConfig.MaxAcceleration,
-			Angular: 0,
-		}
-
-		trajectory, err := td.plannerPlanRelativeForAxis(task, axisID, accel)
-		if err != nil {
-			continue
-		}
-
-		for _, point := range trajectory {
-			cmd := types.MotionCommand{
-				DeviceID:    axisConfig.DeviceID,
-				CommandType: task.Type,
-				Position:    point.Position,
-				Velocity:    point.Velocity,
-				Acceleration: accel,
-				Timestamp:   point.Timestamp,
-			}
-			commands = append(commands, cmd)
-		}
+// getTargetValueForDimension extracts the target value for a specific dimension
+func (td *TaskDecomposer) getTargetValueForDimension(target types.Point, dimName string) float64 {
+	switch dimName {
+	case "X", "x":
+		return target.X
+	case "Y", "y":
+		return target.Y
+	case "Z", "z":
+		return target.Z
+	default:
+		// For custom dimensions, you might need a more sophisticated mapping
+		return target.X // Default fallback
 	}
-
-	return commands
 }
 
-func (td *TaskDecomposer) decomposeHome(task *types.Task) []types.MotionCommand {
-	commands := make([]types.MotionCommand, 0)
-
-	for _, axisID := range task.Axes {
-		axisConfig, exists := td.config.Axes[axisID]
-		if !exists {
-			continue
-		}
-
-		cmd := types.MotionCommand{
-			DeviceID:    axisConfig.DeviceID,
-			CommandType: types.CommandHome,
-			Position:    types.Point{X: axisConfig.HomePosition, Y: 0, Z: 0},
-			Velocity:    types.Velocity{Linear: axisConfig.MaxVelocity * 0.5, Angular: 0},
-			Acceleration: types.Velocity{Linear: axisConfig.MaxAcceleration * 0.5, Angular: 0},
-		}
-		commands = append(commands, cmd)
+// createPointForDimension creates a Point with the value set for the specific dimension
+func (td *TaskDecomposer) createPointForDimension(value float64, dimName string) types.Point {
+	switch dimName {
+	case "X", "x":
+		return types.Point{X: value, Y: 0, Z: 0}
+	case "Y", "y":
+		return types.Point{X: 0, Y: value, Z: 0}
+	case "Z", "z":
+		return types.Point{X: 0, Y: 0, Z: value}
+	default:
+		// For custom dimensions, use X as default
+		return types.Point{X: value, Y: 0, Z: 0}
 	}
-
-	return commands
 }
 
-func (td *TaskDecomposer) decomposeStop(task *types.Task) []types.MotionCommand {
-	commands := make([]types.MotionCommand, 0)
-
-	for _, axisID := range task.Axes {
-		axisConfig, exists := td.config.Axes[axisID]
-		if !exists {
-			continue
-		}
-
-		cmd := types.MotionCommand{
-			DeviceID:    axisConfig.DeviceID,
-			CommandType: types.CommandStop,
-			Position:    types.Point{},
-			Velocity:    types.Velocity{Linear: 0, Angular: 0},
-			Acceleration: types.Velocity{Linear: 0, Angular: 0},
-		}
-		commands = append(commands, cmd)
-	}
-
-	return commands
-}
-
-func (td *TaskDecomposer) decomposeJog(task *types.Task) []types.MotionCommand {
-	commands := make([]types.MotionCommand, 0)
-
-	for _, axisID := range task.Axes {
-		axisConfig, exists := td.config.Axes[axisID]
-		if !exists {
-			continue
-		}
-
-		cmd := types.MotionCommand{
-			DeviceID:    axisConfig.DeviceID,
-			CommandType: types.CommandJog,
-			Position:    task.Target,
-			Velocity:    task.Velocity,
-			Acceleration: types.Velocity{Linear: axisConfig.MaxAcceleration, Angular: 0},
-		}
-		commands = append(commands, cmd)
-	}
-
-	return commands
-}
-
-func (td *TaskDecomposer) plannerPlanForAxis(task *types.Task, axisID types.AxisID, accel types.Velocity) ([]TrajectoryPoint, error) {
-	start := types.Point{X: 0, Y: 0, Z: 0}
-	end := task.Target
-	return td.planner.PlanPointToPoint(start, end, task.Velocity, accel)
-}
-
-func (td *TaskDecomposer) plannerPlanRelativeForAxis(task *types.Task, axisID types.AxisID, accel types.Velocity) ([]TrajectoryPoint, error) {
-	start := types.Point{X: 0, Y: 0, Z: 0}
-	end := task.Target
-	return td.planner.PlanLinear(start, end, task.Velocity, accel)
-}
 
 func (td *TaskDecomposer) ValidateTask(task *types.Task) error {
 	if task == nil {
@@ -389,23 +484,39 @@ func (td *TaskDecomposer) ValidateTask(task *types.Task) error {
 		return fmt.Errorf("task type cannot be empty")
 	}
 
-	if len(task.Axes) == 0 {
-		return fmt.Errorf("task must specify at least one axis")
+	if task.DeviceGroup == "" {
+		return fmt.Errorf("task must specify a device group")
 	}
 
-	for _, axisID := range task.Axes {
-		axisConfig, exists := td.config.Axes[axisID]
+	if len(task.Dimensions) == 0 {
+		return fmt.Errorf("task must specify at least one dimension")
+	}
+
+	// Validate device group exists
+	deviceGroup, err := td.getDeviceGroupConfig(task.DeviceGroup)
+	if err != nil {
+		return fmt.Errorf("device group validation failed: %w", err)
+	}
+
+	// Validate dimensions exist in device group
+	for _, dimName := range task.Dimensions {
+		dimConfig, exists := deviceGroup.Dimensions[dimName]
 		if !exists {
-			return fmt.Errorf("axis %s not found in configuration", axisID)
+			return fmt.Errorf("dimension %s not found in device group %s", dimName, task.DeviceGroup)
 		}
 
-		if task.Velocity.Linear > axisConfig.MaxVelocity {
-			return fmt.Errorf("velocity %f exceeds maximum for axis %s", task.Velocity.Linear, axisID)
+		// Validate velocity constraints
+		if task.Velocity.Linear > dimConfig.MaxVelocity {
+			return fmt.Errorf("velocity %f exceeds maximum %f for dimension %s in device group %s",
+				task.Velocity.Linear, dimConfig.MaxVelocity, dimName, task.DeviceGroup)
 		}
 
+		// Validate position constraints for absolute moves
 		if task.Type == types.CommandMoveTo {
-			if task.Target.X < axisConfig.MinPosition || task.Target.X > axisConfig.MaxPosition {
-				return fmt.Errorf("target X position %f is out of bounds for axis %s", task.Target.X, axisID)
+			targetValue := td.getTargetValueForDimension(task.Target, dimName)
+			if targetValue < dimConfig.MinValue || targetValue > dimConfig.MaxValue {
+				return fmt.Errorf("target position %f for dimension %s is out of bounds [%f, %f]",
+					targetValue, dimName, dimConfig.MinValue, dimConfig.MaxValue)
 			}
 		}
 	}

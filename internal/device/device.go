@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"control/pkg/types"
 	"control/internal/core"
 	"control/internal/hardware"
 	"control/internal/logging"
+	"control/pkg/types"
 )
 
 type BaseDevice struct {
@@ -72,273 +72,10 @@ func (bd *BaseDevice) SetConnected(connected bool) {
 	bd.status.LastSeen = time.Now()
 }
 
-type MockDevice struct {
-	*BaseDevice
-	position types.Point
-	velocity types.Velocity
-}
-
-func NewMockDevice(id types.DeviceID, config types.DeviceConfig) *MockDevice {
-	base := NewBaseDevice(id, "mock", config)
-	return &MockDevice{
-		BaseDevice: base,
-		position:   types.Point{X: 0, Y: 0, Z: 0},
-		velocity:   types.Velocity{Linear: 0, Angular: 0},
-	}
-}
-
-func (md *MockDevice) Connect() error {
-	md.SetConnected(true)
-	logging.GetLogger("mock_device").Info("Mock device connected", "device_id", md.id)
-	return nil
-}
-
-func (md *MockDevice) Disconnect() {
-	md.SetConnected(false)
-	logging.GetLogger("mock_device").Info("Mock device disconnected", "device_id", md.id)
-}
-
-func (md *MockDevice) Write(cmd types.MotionCommand) error {
-	if !md.IsConnected() {
-		return fmt.Errorf("device %s is not connected", md.id)
-	}
-
-	md.position = cmd.Position
-	md.velocity = cmd.Velocity
-
-	md.SetStatus(types.DeviceStatus{
-		ID:        md.id,
-		Connected: true,
-		Position:  md.position,
-		Velocity:  md.velocity,
-		LastSeen:  time.Now(),
-	})
-
-	logging.GetLogger("mock_device").Info("Mock device executed command",
-		"device_id", md.id, "command_type", cmd.CommandType, "position", md.position, "velocity", md.velocity)
-
-	return nil
-}
-
-func (md *MockDevice) Read(reg string) (interface{}, error) {
-	if !md.IsConnected() {
-		return nil, fmt.Errorf("device %s is not connected", md.id)
-	}
-
-	switch reg {
-	case "position":
-		return md.position, nil
-	case "velocity":
-		return md.velocity, nil
-	case "connected":
-		return md.IsConnected(), nil
-	default:
-		return nil, fmt.Errorf("unknown register: %s", reg)
-	}
-}
-
-type ModbusDevice struct {
-	*BaseDevice
-	client   *ModbusClient
-	endpoint string
-}
-
-func NewModbusDevice(id types.DeviceID, config types.DeviceConfig) *ModbusDevice {
-	base := NewBaseDevice(id, "modbus", config)
-	return &ModbusDevice{
-		BaseDevice: base,
-		endpoint:   config.Endpoint,
-	}
-}
-
-func (md *ModbusDevice) Connect() error {
-	client, err := NewModbusClient(md.endpoint, md.config.Timeout)
-	if err != nil {
-		return fmt.Errorf("failed to create modbus client: %w", err)
-	}
-
-	md.client = client
-	md.SetConnected(true)
-	logging.GetLogger("modbus_device").Info("Modbus device connected", "device_id", md.id, "endpoint", md.endpoint)
-	return nil
-}
-
-func (md *ModbusDevice) Disconnect() {
-	if md.client != nil {
-		md.client.Close()
-		md.client = nil
-	}
-	md.SetConnected(false)
-	logging.GetLogger("modbus_device").Info("Modbus device disconnected", "device_id", md.id)
-}
-
-func (md *ModbusDevice) Write(cmd types.MotionCommand) error {
-	if !md.IsConnected() || md.client == nil {
-		return fmt.Errorf("device %s is not connected", md.id)
-	}
-
-	switch cmd.CommandType {
-	case types.CommandMoveTo:
-		if err := md.writePositionRegisters(cmd.Position); err != nil {
-			return err
-		}
-	case types.CommandStop:
-		if err := md.writeStopCommand(); err != nil {
-			return err
-		}
-	case types.CommandHome:
-		if err := md.writeHomeCommand(); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("unsupported command type: %s", cmd.CommandType)
-	}
-
-	md.updateStatus(cmd)
-	return nil
-}
-
-func (md *ModbusDevice) Read(reg string) (interface{}, error) {
-	if !md.IsConnected() || md.client == nil {
-		return nil, fmt.Errorf("device %s is not connected", md.id)
-	}
-
-	switch reg {
-	case "position":
-		return md.readPositionRegisters()
-	case "velocity":
-		return md.readVelocityRegisters()
-	case "status":
-		return md.readStatusRegister()
-	default:
-		return nil, fmt.Errorf("unknown register: %s", reg)
-	}
-}
-
-func (md *ModbusDevice) writePositionRegisters(pos types.Point) error {
-	if md.client == nil {
-		return fmt.Errorf("modbus client not initialized")
-	}
-
-	values := []uint16{
-		uint16(pos.X * 1000),
-		uint16(pos.Y * 1000),
-		uint16(pos.Z * 1000),
-	}
-
-	return md.client.WriteHoldingRegisters(0, values)
-}
-
-func (md *ModbusDevice) writeStopCommand() error {
-	if md.client == nil {
-		return fmt.Errorf("modbus client not initialized")
-	}
-	return md.client.WriteSingleRegister(100, 0)
-}
-
-func (md *ModbusDevice) writeHomeCommand() error {
-	if md.client == nil {
-		return fmt.Errorf("modbus client not initialized")
-	}
-	return md.client.WriteSingleRegister(101, 1)
-}
-
-func (md *ModbusDevice) readPositionRegisters() (types.Point, error) {
-	if md.client == nil {
-		return types.Point{}, fmt.Errorf("modbus client not initialized")
-	}
-
-	values, err := md.client.ReadHoldingRegisters(0, 3)
-	if err != nil {
-		return types.Point{}, err
-	}
-
-	return types.Point{
-		X: float64(values[0]) / 1000,
-		Y: float64(values[1]) / 1000,
-		Z: float64(values[2]) / 1000,
-	}, nil
-}
-
-func (md *ModbusDevice) readVelocityRegisters() (types.Velocity, error) {
-	if md.client == nil {
-		return types.Velocity{}, fmt.Errorf("modbus client not initialized")
-	}
-
-	values, err := md.client.ReadHoldingRegisters(10, 2)
-	if err != nil {
-		return types.Velocity{}, err
-	}
-
-	return types.Velocity{
-		Linear:  float64(values[0]) / 1000,
-		Angular: float64(values[1]) / 1000,
-	}, nil
-}
-
-func (md *ModbusDevice) readStatusRegister() (uint16, error) {
-	if md.client == nil {
-		return 0, fmt.Errorf("modbus client not initialized")
-	}
-	values, err := md.client.ReadHoldingRegisters(20, 1)
-	if err != nil {
-		return 0, err
-	}
-	if len(values) == 0 {
-		return 0, fmt.Errorf("no status register value")
-	}
-	return values[0], nil
-}
-
-func (md *ModbusDevice) updateStatus(cmd types.MotionCommand) {
-	status := md.Status()
-	status.Position = cmd.Position
-	status.Velocity = cmd.Velocity
-	status.LastSeen = time.Now()
-	md.SetStatus(status)
-}
-
-type ModbusClient struct {
-	endpoint string
-	timeout  time.Duration
-}
-
-func NewModbusClient(endpoint string, timeout time.Duration) (*ModbusClient, error) {
-	return &ModbusClient{
-		endpoint: endpoint,
-		timeout:  timeout,
-	}, nil
-}
-
-func (mc *ModbusClient) ReadHoldingRegisters(address, quantity uint16) ([]uint16, error) {
-	logging.GetLogger("modbus_client").Debug("Modbus read holding registers", "address", address, "quantity", quantity)
-
-	values := make([]uint16, quantity)
-	for i := range values {
-		values[i] = uint16(i * 100)
-	}
-
-	return values, nil
-}
-
-func (mc *ModbusClient) WriteHoldingRegisters(address uint16, values []uint16) error {
-	logging.GetLogger("modbus_client").Debug("Modbus write holding registers", "address", address, "values", values)
-	return nil
-}
-
-func (mc *ModbusClient) WriteSingleRegister(address, value uint16) error {
-	logging.GetLogger("modbus_client").Debug("Modbus write single register", "address", address, "value", value)
-	return nil
-}
-
-func (mc *ModbusClient) Close() {
-	logging.GetLogger("modbus_client").Info("Modbus client closed")
-}
-
 // HardwareDevice wraps the new hardware abstraction layer for compatibility
 type HardwareDevice struct {
 	*BaseDevice
-	config       types.DeviceConfig
+	config      types.DeviceConfig
 	hardwareMgr *hardware.HardwareFactory
 	hwDeviceID  string
 }
@@ -503,14 +240,14 @@ func (hd *HardwareDevice) updateStatus(cmd types.MotionCommand) {
 }
 
 type DeviceManager struct {
-	devices       map[types.DeviceID]core.Device
-	devicesLock   sync.RWMutex
-	config        types.SystemConfig
-	hardwareMgr   *hardware.HardwareFactory
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	logger        *logging.Logger
+	devices     map[types.DeviceID]core.Device
+	devicesLock sync.RWMutex
+	config      types.SystemConfig
+	hardwareMgr *hardware.HardwareFactory
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	logger      *logging.Logger
 }
 
 func NewDeviceManager(config types.SystemConfig) *DeviceManager {
@@ -586,21 +323,13 @@ func (dm *DeviceManager) Stop() error {
 }
 
 func (dm *DeviceManager) createDevice(deviceID types.DeviceID, config types.DeviceConfig) (core.Device, error) {
-	// Try to create a device using the new hardware abstraction layer
+	// Only use the new hardware abstraction layer
 	if _, err := dm.hardwareMgr.CreateDeviceConfig(string(deviceID), config); err == nil {
 		// Hardware layer supports this protocol, create a compatible wrapper
 		return NewHardwareDevice(deviceID, config, dm.hardwareMgr), nil
 	}
 
-	// Fall back to legacy implementations
-	switch config.Protocol {
-	case "mock":
-		return NewMockDevice(deviceID, config), nil
-	case "modbus":
-		return NewModbusDevice(deviceID, config), nil
-	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", config.Protocol)
-	}
+	return nil, fmt.Errorf("unsupported device protocol: %s. Supported protocols should be configured in the hardware abstraction layer.", config.Protocol)
 }
 
 func (dm *DeviceManager) GetDevice(deviceID types.DeviceID) (core.Device, error) {

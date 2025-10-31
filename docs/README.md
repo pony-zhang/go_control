@@ -1,214 +1,91 @@
-# 运动控制系统文档
+# Motion Control System Documentation
 
-## 文档概述
+## Overview
 
-本目录包含运动控制系统的完整技术文档，涵盖系统架构、数据流分析、开发指南等方面的详细说明。
+This directory contains comprehensive technical documentation for the motion control system, covering architecture, data flow, and development guidelines.
 
-## 文档结构
+## Documentation Structure
 
 ### 📁 [architecture.md](./architecture.md)
-**系统架构文档**
+**System Architecture**
 
-- 🏗️ **四层主架构**: 协调层、管理层、基础设施层、应用层
-- 🔧 **硬件抽象层(HAL)**: 统一硬件接口和多协议支持
-- 📊 **水平子层**: 业务逻辑层、任务编排层、服务协调层、HAL
-- ⚡ **事件驱动命令处理**: CommandRouter和CommandHandler接口
-- 🎨 **设计模式**: HAL模式、水平分层、事件驱动、资源管理
-- 🛡️ **安全机制**: 多层安全检查和紧急处理流程
-- 📈 **扩展性设计**: 模块化和性能优化策略
-
-### 📁 [data-flow.md](./data流和状态管理.md)
-**数据流和状态管理**
-
-- 🔄 **事件驱动命令流程**: 外部请求→CommandRouter→CommandHandlers→各层处理
-- 📋 **主要数据结构**: BusinessMessage、BusinessResponse、Task、MotionCommand
-- 🚀 **水平分层通信**: 业务逻辑→任务编排→服务协调→HAL→物理设备
-- 📊 **状态管理**: 分层状态跟踪和转换机制
-- ⚡ **命令路由机制**: CommandRouter智能路由到相应的CommandHandler
-- ⚠️ **分层错误处理**: 层级错误传播和恢复机制
-- 📈 **性能监控**: 分层性能指标和资源监控
-- 🔒 **数据一致性**: 分层并发控制和事务性操作
+Four-layer modular architecture with event-driven command processing:
+- Coordination Layer (Event Loop + Management)
+- Infrastructure Layer (Config + Device + IPC)
+- Application Layer (Business → Task → Service → HAL)
+- Hardware Abstraction Layer (HAL)
 
 ### 📁 [development.md](./development.md)
-**开发指南**
+**Development Guide**
 
-- 🛠️ **分层开发环境**: 项目结构和依赖管理
-- 🏗️ **分层架构概念**: 四层主架构和水平子层详解
-- 💡 **HAL开发**: 协议接口实现和资源管理
-- ⚡ **事件驱动开发**: CommandHandler接口和CommandRouter实现
-- 🚀 **水平层开发**: 业务逻辑、任务编排、服务协调层开发
-- ⚙️ **分层配置管理**: HAL配置和水平层配置
-- 🔍 **分层调试诊断**: 分层日志和状态监控
-- 🛡️ **分层错误处理**: 层级错误传播和恢复
-- 🧪 **分层测试**: 单元测试、集成测试、模拟测试
-- 🚢 **分层部署**: 容器化和监控配置
+Comprehensive development guide including:
+- Development environment setup
+- Event-driven command processing
+- HAL protocol implementation
+- Testing strategies
+- Deployment guidelines
 
-### 📁 [NEW_COMMAND_DEMO.md](./NEW_COMMAND_DEMO.md)
-**事件驱动命令处理架构演示**
+### 📁 [data-flow.md](./data-flow.md)
+**Data Flow and State Management**
 
-- ⚡ **事件驱动架构**: CommandRouter和CommandHandler接口详解
-- 🔄 **架构演进**: 从复杂接口到事件驱动的彻底转型
-- 📋 **命令类型**: BusinessCommand类型和处理器分配
-- 🛠️ **扩展指南**: 添加新CommandHandler的方法
-- 🧪 **测试验证**: 构建运行测试和命令示例
-- 📊 **架构优势**: 模块化、解耦、可扩展性分析
+Event-driven data flow analysis:
+- Command routing mechanisms
+- Layer communication patterns
+- State management
+- Error handling
+- Performance monitoring
 
-## 快速导航
+## Quick Start
 
-### 🎯 新手入门
-1. 阅读 [architecture.md](./architecture.md) 了解四层主架构和事件驱动设计
-2. 查看 [NEW_COMMAND_DEMO.md](./NEW_COMMAND_DEMO.md) 了解事件驱动命令处理架构
-3. 运行 `go run build.go` 构建系统
-4. 使用 `./bin/control` 启动控制系统
-5. 查看 `config.yaml` 了解系统配置
+### 🎯 For New Users
+1. Read [architecture.md](./architecture.md) to understand the system design
+2. Follow the development guide in [development.md](./development.md)
+3. Check the data flow documentation in [data-flow.md](./data-flow.md)
 
-### 🔧 功能开发
-1. 参考 [development.md](./development.md) 的"事件驱动开发"部分
-2. 根据开发需求选择对应层次：
-   - **新命令处理器**: 实现CommandHandler接口
-   - **新设备协议**: HAL协议接口实现
-   - **新业务命令**: 业务逻辑层开发
-   - **新任务类型**: 任务编排层开发
-   - **资源管理**: HAL资源管理器
-3. 遵循事件驱动架构原则和接口规范
-4. 提交PR前运行 `go test ./...` 进行测试
+### 🔧 For Developers
+1. **Adding New Commands**: Implement `CommandHandler` interface
+2. **Adding New Protocols**: Use HAL `Protocol` interface
+3. **Adding New Layers**: Follow the horizontal layer pattern
+4. **Testing**: Run `go test ./...` before submitting
 
-### 🐛 问题排查
-1. 查看 [data-flow.md](./data-flow.md) 的"分层错误处理"
-2. 使用 [development.md](./development.md) 的"分层调试诊断"工具
-3. 检查各层日志文件和分层状态
-4. 使用分层性能分析工具定位瓶颈
+### 🐛 Troubleshooting
+1. Check [data-flow.md](./data-flow.md) for error handling patterns
+2. Use structured logging for debugging
+3. Monitor system state through IPC interface
 
-### 🚀 性能优化
-1. 阅读 [architecture.md](./architecture.md) 的"HAL和水平层设计"
-2. 查看 [data-flow.md](./data-flow.md) 的"分层性能监控"
-3. 调整分层配置参数（HAL协议参数、队列大小等）
-4. 使用分层性能分析工具进行优化
+## Key Concepts
 
-## 系统特性
+### Event-Driven Architecture
+- **CommandRouter**: Intelligent routing of business commands
+- **CommandHandler**: Modular command processing interface
+- **BusinessCommand**: High-level abstract command types
+- **Subscription-based**: Modules subscribe to commands they handle
 
-### 🏗️ 架构特点
-- **四层主架构**: 协调层、管理层、基础设施层、应用层
-- **水平子层**: 业务逻辑层、任务编排层、服务协调层、硬件抽象层
-- **事件驱动命令处理**: CommandRouter和CommandHandler接口实现模块化处理
-- **HAL模式**: 统一硬件接口，支持多协议设备
-- **管理器模式**: 分层组件协调和生命周期管理
-- **接口驱动**: 所有组件基于标准化接口实现
-- **事件驱动**: 中央事件循环协调所有模块
+### Hardware Abstraction Layer (HAL)
+- **Unified Interface**: Single interface for diverse hardware
+- **Multi-Protocol Support**: Mock, Modbus, Serial, Custom protocols
+- **Resource Management**: Dynamic hardware resource allocation
+- **Protocol Adapters**: Extensible protocol framework
 
-### 🔄 数据流特点
-- **事件驱动命令路由**: BusinessCommand通过CommandRouter智能路由到相应处理器
-- **分层通信**: 水平层间标准化接口通信
-- **异步处理**: 通过通道实现高效的层间通信
-- **状态管理**: 分层状态跟踪和转换机制
-- **错误传播**: 层级错误处理和恢复机制
-- **资源管理**: 硬件资源动态分配和监控
-- **数据一致性**: 分层并发控制和事务性操作
+### Four-Layer Architecture
+- **Coordination**: Event-driven system coordination
+- **Infrastructure**: Core services (config, devices, IPC)
+- **Application**: Business logic, task orchestration, service coordination
+- **Physical**: Hardware devices and sensors
 
-### 🛠️ 开发特点
-- **事件驱动开发**: CommandHandler接口实现模块化命令处理
-- **分层开发**: 每层职责明确，便于并行开发
-- **配置驱动**: YAML配置文件，支持分层配置和热重载
-- **HAL抽象**: 多协议支持，易于硬件扩展
-- **结构化日志**: 基于slog的分层日志系统
-- **分层测试**: 单元测试、集成测试、分层模拟测试
-- **接口标准化**: 层间通过明确定义的接口通信
+## Getting Help
 
-### 🚀 运维特点
-- **分层部署**: 支持容器化和微服务部署
-- **分层监控**: 各层性能指标和状态监控
-- **配置热重载**: 运行时配置更新，无需重启
-- **优雅关闭**: 分层资源清理和优雅停机
-- **健康检查**: 分层健康状态检查和故障恢复
-- **日志聚合**: 分层日志收集和分析
+### 📧 Support
+- **Issues**: Use GitHub Issues with appropriate labels
+- **Discussions**: Use GitHub Discussions for questions
+- **Documentation**: Submit PRs for documentation improvements
 
-## 贡献指南
-
-### 📝 文档维护
-- 保持文档的准确性和时效性
-- 添加新功能时更新相关文档
-- 使用清晰的markdown格式
-- 包含适当的示例和图表
-
-### 🔧 代码贡献
-- 遵循Go标准代码风格
-- 编写完整的单元测试
-- 添加适当的注释和文档
-- 提交前运行所有测试
-
-### 🐛 问题报告
-- 提供详细的复现步骤
-- 包含系统环境信息
-- 附加相关的日志输出
-- 建议解决方案（如果有）
-
-## 版本历史
-
-### v3.0.0 (当前版本)
-- ✅ **事件驱动命令处理**: CommandRouter和CommandHandler接口实现
-- ✅ **简化的前端接口**: 只发送BusinessCommand，后端负责路由和处理
-- ✅ **模块化架构**: 每个CommandHandler专注于特定领域的命令处理
-- ✅ **四层主架构**: 协调层、管理层、基础设施层、应用层
-- ✅ **硬件抽象层(HAL)**: 统一硬件接口和多协议支持
-- ✅ **水平子层**: 业务逻辑层、任务编排层、服务协调层、HAL
-- ✅ **分层管理器**: 统一的组件协调和生命周期管理
-- ✅ **资源管理**: 硬件资源动态分配和监控
-- ✅ **slog结构化日志**: 现代化日志系统
-- ✅ **分层配置管理**: 支持热重载和分层配置
-- ✅ **完整的文档体系**: 更新所有文档以反映事件驱动架构
-
-### v2.0.0 (之前版本)
-- ✅ **四层主架构**: 协调层、管理层、基础设施层、应用层
-- ✅ **硬件抽象层(HAL)**: 统一硬件接口和多协议支持
-- ✅ **水平子层**: 业务逻辑层、任务编排层、服务协调层、HAL
-- ✅ **分层管理器**: 统一的组件协调和生命周期管理
-- ✅ **资源管理**: 硬件资源动态分配和监控
-- ✅ **slog结构化日志**: 现代化日志系统
-- ✅ **分层配置管理**: 支持热重载和分层配置
-- ✅ **完整的文档体系**: 更新所有文档以反映新架构
-
-### v1.0.0 (之前版本)
-- ✅ 基础的运动控制功能
-- ✅ 多协议设备支持
-- ✅ IPC通信能力
-- ✅ 配置管理和热重载
-- ✅ 标准日志系统
-
-### 未来计划
-- 🔄 **Web管理界面**: 分层状态可视化和管理
-- 🔄 **REST API支持**: 分层API接口
-- 🔄 **更多设备协议**: 扩展HAL协议支持
-- 🔄 **高级轨迹规划**: 增强任务编排能力
-- 🔄 **分布式部署支持**: 跨多层分布式部署
-- 🔄 **AI优化**: 基于分层数据的性能优化
-- 🔄 **云原生支持**: Kubernetes部署和云服务集成
-
-## 技术支持
-
-### 📧 联系方式
-- **架构问题**: 通过GitHub Issues标记"architecture"标签
-- **HAL开发问题**: 通过GitHub Issues标记"hal"标签
-- **功能建议**: 通过GitHub Discussions
-- **文档问题**: 直接提交PR
-- **紧急问题**: 通过邮件或即时通讯联系
-
-### 📚 相关资源
-- [Go官方文档](https://golang.org/doc/)
-- [Go标准库](https://pkg.go.dev/std)
-- [工业自动化最佳实践](https://www.iso.org/committee/539028.html)
-- [硬件抽象层设计模式](https://en.wikipedia.org/wiki/Hardware_abstraction)
-- [分层架构模式](https://patterns.dev/posts/layered-architecture-pattern/)
-
-### 🎯 学习路径
-1. **基础概念**: 阅读 [architecture.md](./architecture.md) 了解四层主架构
-2. **事件驱动架构**: 查看 [NEW_COMMAND_DEMO.md](./NEW_COMMAND_DEMO.md) 了解CommandHandler和CommandRouter
-3. **开发入门**: 查看 [development.md](./development.md) 的事件驱动开发部分
-4. **数据流理解**: 学习 [data-flow.md](./data-flow.md) 的命令路由机制
-5. **HAL开发**: 重点学习HAL协议接口和资源管理
-6. **水平层开发**: 掌握业务逻辑、任务编排、服务协调层开发
-7. **高级主题**: 分层测试、性能优化、部署运维
+### 📚 External Resources
+- [Go Documentation](https://golang.org/doc/)
+- [HAL Design Patterns](https://en.wikipedia.org/wiki/Hardware_abstraction)
+- [Industrial Automation Standards](https://www.iso.org/committee/539028.html)
 
 ---
 
-*本文档随系统持续更新，最后更新时间: 2025-09-30*
-*当前版本: v3.0.0 - 事件驱动命令处理架构*
+*Last updated: 2025-10-31*
+*Current version: v3.0.0 - Event-Driven Command Processing Architecture*

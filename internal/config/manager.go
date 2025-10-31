@@ -211,6 +211,11 @@ func (cm *ConfigManager) validateConfig(config *types.SystemConfig) error {
 		config.CommandMappings = make(map[string]types.CommandMapping)
 	}
 
+	// Initialize device groups if not provided
+	if config.DeviceGroups == nil {
+		config.DeviceGroups = make(map[string]types.DeviceGroupConfig)
+	}
+
 	if len(config.Devices) == 0 {
 		return fmt.Errorf("at least one device must be configured")
 	}
@@ -227,18 +232,37 @@ func (cm *ConfigManager) validateConfig(config *types.SystemConfig) error {
 		}
 	}
 
-	for axisID, axisConfig := range config.Axes {
-		if axisConfig.DeviceID == "" {
-			return fmt.Errorf("axis %s must have a device ID", axisID)
+	// Validate device groups
+	for groupID, groupConfig := range config.DeviceGroups {
+		if groupConfig.Name == "" {
+			return fmt.Errorf("device group %s must have a name", groupID)
 		}
-		if axisConfig.MaxVelocity <= 0 {
-			return fmt.Errorf("axis %s must have a positive max velocity", axisID)
+		if len(groupConfig.DeviceIDs) == 0 {
+			return fmt.Errorf("device group %s must have at least one device", groupID)
 		}
-		if axisConfig.MaxAcceleration <= 0 {
-			return fmt.Errorf("axis %s must have a positive max acceleration", axisID)
+		// Check all devices in the group exist
+		for _, deviceID := range groupConfig.DeviceIDs {
+			if _, exists := config.Devices[deviceID]; !exists {
+				return fmt.Errorf("device %s in group %s does not exist", deviceID, groupID)
+			}
 		}
-		if axisConfig.MinPosition >= axisConfig.MaxPosition {
-			return fmt.Errorf("axis %s must have min position < max position", axisID)
+		// Validate dimensions
+		for dimName, dimConfig := range groupConfig.Dimensions {
+			if dimConfig.Name == "" {
+				return fmt.Errorf("dimension %s in group %s must have a name", dimName, groupID)
+			}
+			if dimConfig.Type == "" {
+				return fmt.Errorf("dimension %s in group %s must have a type", dimName, groupID)
+			}
+			if dimConfig.MaxVelocity <= 0 {
+				return fmt.Errorf("dimension %s in group %s must have positive max velocity", dimName, groupID)
+			}
+			if dimConfig.MaxAccel <= 0 {
+				return fmt.Errorf("dimension %s in group %s must have positive max acceleration", dimName, groupID)
+			}
+			if dimConfig.MinValue >= dimConfig.MaxValue {
+				return fmt.Errorf("dimension %s in group %s must have min < max", dimName, groupID)
+			}
 		}
 	}
 
@@ -257,13 +281,13 @@ func (cm *ConfigManager) GetDeviceConfig(deviceID types.DeviceID) (types.DeviceC
 	return config, nil
 }
 
-func (cm *ConfigManager) GetAxisConfig(axisID types.AxisID) (types.AxisConfig, error) {
+func (cm *ConfigManager) GetDeviceGroupConfig(groupID string) (types.DeviceGroupConfig, error) {
 	cm.configLock.RLock()
 	defer cm.configLock.RUnlock()
 
-	config, exists := cm.config.Axes[axisID]
+	config, exists := cm.config.DeviceGroups[groupID]
 	if !exists {
-		return types.AxisConfig{}, fmt.Errorf("axis %s not found in configuration", axisID)
+		return types.DeviceGroupConfig{}, fmt.Errorf("device group %s not found in configuration", groupID)
 	}
 
 	return config, nil
@@ -281,16 +305,66 @@ func (cm *ConfigManager) UpdateDeviceConfig(deviceID types.DeviceID, config type
 	return cm.SetConfig(cm.config)
 }
 
-func (cm *ConfigManager) UpdateAxisConfig(axisID types.AxisID, config types.AxisConfig) error {
+func (cm *ConfigManager) UpdateDeviceGroupConfig(groupID string, config types.DeviceGroupConfig) error {
 	cm.configLock.Lock()
 	defer cm.configLock.Unlock()
 
-	if _, exists := cm.config.Axes[axisID]; !exists {
-		return fmt.Errorf("axis %s not found in configuration", axisID)
+	if _, exists := cm.config.DeviceGroups[groupID]; !exists {
+		return fmt.Errorf("device group %s not found in configuration", groupID)
 	}
 
-	cm.config.Axes[axisID] = config
+	cm.config.DeviceGroups[groupID] = config
 	return cm.SetConfig(cm.config)
+}
+
+func (cm *ConfigManager) AddDeviceGroup(groupID string, config types.DeviceGroupConfig) error {
+	cm.configLock.Lock()
+	defer cm.configLock.Unlock()
+
+	if _, exists := cm.config.DeviceGroups[groupID]; exists {
+		return fmt.Errorf("device group %s already exists", groupID)
+	}
+
+	cm.config.DeviceGroups[groupID] = config
+	return cm.SetConfig(cm.config)
+}
+
+func (cm *ConfigManager) RemoveDeviceGroup(groupID string) error {
+	cm.configLock.Lock()
+	defer cm.configLock.Unlock()
+
+	if _, exists := cm.config.DeviceGroups[groupID]; !exists {
+		return fmt.Errorf("device group %s not found in configuration", groupID)
+	}
+
+	delete(cm.config.DeviceGroups, groupID)
+	return cm.SetConfig(cm.config)
+}
+
+func (cm *ConfigManager) GetDimensionConfig(groupID, dimensionName string) (types.DimensionConfig, error) {
+	groupConfig, err := cm.GetDeviceGroupConfig(groupID)
+	if err != nil {
+		return types.DimensionConfig{}, err
+	}
+
+	dimension, exists := groupConfig.Dimensions[dimensionName]
+	if !exists {
+		return types.DimensionConfig{}, fmt.Errorf("dimension %s not found in device group %s", dimensionName, groupID)
+	}
+
+	return dimension, nil
+}
+
+func (cm *ConfigManager) ListDeviceGroups() []string {
+	cm.configLock.RLock()
+	defer cm.configLock.RUnlock()
+
+	groups := make([]string, 0, len(cm.config.DeviceGroups))
+	for groupID := range cm.config.DeviceGroups {
+		groups = append(groups, groupID)
+	}
+
+	return groups
 }
 
 func (cm *ConfigManager) CreateDefaultConfig() error {
@@ -421,33 +495,65 @@ func (cm *ConfigManager) CreateDefaultConfig() error {
 				Timeout:  10 * time.Second,
 			},
 		},
-		Axes: map[types.AxisID]types.AxisConfig{
-			"axis-x": {
-				DeviceID:        "device-1",
-				MaxVelocity:     100.0,
-				MaxAcceleration: 50.0,
-				MinPosition:     -1000.0,
-				MaxPosition:     1000.0,
-				HomePosition:    0.0,
-				Units:           "mm",
-			},
-			"axis-y": {
-				DeviceID:        "device-1",
-				MaxVelocity:     100.0,
-				MaxAcceleration: 50.0,
-				MinPosition:     -1000.0,
-				MaxPosition:     1000.0,
-				HomePosition:    0.0,
-				Units:           "mm",
-			},
-			"axis-z": {
-				DeviceID:        "device-1",
-				MaxVelocity:     50.0,
-				MaxAcceleration: 25.0,
-				MinPosition:     -500.0,
-				MaxPosition:     500.0,
-				HomePosition:    0.0,
-				Units:           "mm",
+		DeviceGroups: map[string]types.DeviceGroupConfig{
+			"main_workspace": {
+				Name:        "Main Workspace",
+				Description: "Primary 3-axis cartesian workspace",
+				DeviceIDs:   []types.DeviceID{"device-1"},
+				Dimensions: map[string]types.DimensionConfig{
+					"X": {
+						Name:        "X",
+						Type:        "linear",
+						MinValue:    -1000.0,
+						MaxValue:    1000.0,
+						HomeValue:   0.0,
+						MaxVelocity: 100.0,
+						MaxAccel:    50.0,
+						Units:       "mm",
+						Invert:      false,
+					},
+					"Y": {
+						Name:        "Y",
+						Type:        "linear",
+						MinValue:    -1000.0,
+						MaxValue:    1000.0,
+						HomeValue:   0.0,
+						MaxVelocity: 100.0,
+						MaxAccel:    50.0,
+						Units:       "mm",
+						Invert:      false,
+					},
+					"Z": {
+						Name:        "Z",
+						Type:        "linear",
+						MinValue:    -500.0,
+						MaxValue:    500.0,
+						HomeValue:   0.0,
+						MaxVelocity: 50.0,
+						MaxAccel:    25.0,
+						Units:       "mm",
+						Invert:      false,
+					},
+				},
+				Kinematics: types.KinematicsConfig{
+					Type: "cartesian",
+					Workspace: types.WorkspaceConfig{
+						Shape: "box",
+						Dimensions: map[string]float64{
+							"width":  2000.0,
+							"depth":  2000.0,
+							"height": 1000.0,
+						},
+						Constraints: map[string]interface{}{},
+					},
+					Transforms:  map[string]interface{}{},
+					Constraints: map[string]interface{}{},
+				},
+				Capabilities: map[string]interface{}{
+					"linear_motion": true,
+					"home_all":      true,
+					"emergency_stop": true,
+				},
 			},
 		},
 		Safety: types.SafetyConfig{

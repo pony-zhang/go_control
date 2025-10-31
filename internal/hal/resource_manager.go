@@ -80,18 +80,6 @@ func (rm *ResourceManager) Stop() error {
 func (rm *ResourceManager) initializeHardwareResources() error {
 	rm.logger.Info("Initializing hardware resources")
 
-	// Initialize axis resources
-	for axisID, axisConfig := range rm.config.Axes {
-		rm.logger.Info("Registering axis resource", "axis_id", axisID)
-		rm.registerResource("axis", string(axisID), map[string]interface{}{
-			"device_id":    axisConfig.DeviceID,
-			"min_position": axisConfig.MinPosition,
-			"max_position": axisConfig.MaxPosition,
-			"max_velocity": axisConfig.MaxVelocity,
-			"max_acceleration": axisConfig.MaxAcceleration,
-		})
-	}
-
 	// Initialize device resources
 	for deviceID, deviceConfig := range rm.config.Devices {
 		rm.logger.Info("Registering device resource", "device_id", deviceID)
@@ -100,6 +88,34 @@ func (rm *ResourceManager) initializeHardwareResources() error {
 			"protocol": deviceConfig.Protocol,
 			"endpoint": deviceConfig.Endpoint,
 		})
+	}
+
+	// Initialize device group and dimension resources
+	for groupID, groupConfig := range rm.config.DeviceGroups {
+		rm.logger.Info("Registering device group resource", "group_id", groupID)
+		rm.registerResource("device_group", groupID, map[string]interface{}{
+			"name":        groupConfig.Name,
+			"description": groupConfig.Description,
+			"devices":     groupConfig.DeviceIDs,
+		})
+
+		// Register dimension resources for this device group
+		for dimName, dimConfig := range groupConfig.Dimensions {
+			dimResourceID := fmt.Sprintf("%s:%s", groupID, dimName)
+			rm.logger.Info("Registering dimension resource", "dimension", dimName, "group", groupID)
+			rm.registerResource("dimension", dimResourceID, map[string]interface{}{
+				"group_id":      groupID,
+				"name":          dimConfig.Name,
+				"type":          dimConfig.Type,
+				"min_value":     dimConfig.MinValue,
+				"max_value":     dimConfig.MaxValue,
+				"home_value":    dimConfig.HomeValue,
+				"max_velocity":  dimConfig.MaxVelocity,
+				"max_accel":     dimConfig.MaxAccel,
+				"units":         dimConfig.Units,
+				"invert":        dimConfig.Invert,
+			})
+		}
 	}
 
 	// Initialize safety resources

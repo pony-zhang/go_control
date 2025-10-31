@@ -66,13 +66,10 @@ func NewApplicationManager(infrastructure *InfrastructureManager, systemConfig t
 func (am *ApplicationManager) SetupDependencies() error {
 	am.logger.Info("Setting up application layer dependencies with horizontal layers")
 
-	deviceManager := am.infrastructure.GetDeviceManager()
 	ipcServer := am.infrastructure.GetIPCServer()
 
-	// 1. 将基础设施层设备连接到HAL
-	if err := am.connectDevicesToHAL(deviceManager); err != nil {
-		return fmt.Errorf("failed to connect devices to HAL: %w", err)
-	}
+	// 1. HAL already initialized with system config, no need to connect external hardware factory
+	am.logger.Info("HAL initialized with system configuration, ready for device management")
 
 	// 2. 注册IPC消息处理器到业务逻辑层
 	am.registerIPCHandlers(ipcServer)
@@ -92,15 +89,7 @@ func (am *ApplicationManager) SetupDependencies() error {
 	return nil
 }
 
-// connectDevicesToHAL 将基础设施层的设备连接到HAL
-func (am *ApplicationManager) connectDevicesToHAL(deviceManager interface{}) error {
-	am.logger.Info("Connecting devices from infrastructure to HAL")
-
-	// 这里需要将设备从基础设施层传递到HAL
-	// 由于架构重构，这需要仔细处理依赖关系
-	am.logger.Info("Devices connected to HAL successfully")
-	return nil
-}
+// Hardware factory connection removed - HAL now manages devices directly through system configuration
 
 // setupLayerDependencies 设置水平分层之间的依赖关系
 func (am *ApplicationManager) setupLayerDependencies() error {

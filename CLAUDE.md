@@ -14,37 +14,6 @@ go build -o bin/control ./cmd/control
 go build -o bin/simulator ./cmd/simulator
 ```
 
-### Testing Commands
-
-```bash
-# Run all tests
-go test ./...
-
-# Run tests with coverage
-go test -cover ./...
-
-# Run tests for specific packages
-go test ./internal/core
-go test ./internal/device
-go test ./internal/ipc
-```
-
-## Running Applications
-
-```bash
-# Run control system with default config
-./bin/control
-
-# Run control system with custom config
-./bin/control -config /path/to/config.yaml
-
-# Run simulator connecting to localhost:18080
-./bin/simulator
-
-# Run simulator with custom connection
-./bin/simulator -address 192.168.1.100 -port 18080
-```
-
 ## Architecture Overview
 
 This is a Go-based motion control system for industrial automation with a sophisticated layered architecture:
@@ -149,13 +118,6 @@ The system uses `config.yaml` for configuration:
 - **IPC**: Network communication settings
 - **Task Templates**: Reusable task sequences
 - **Command Mappings**: Abstract to concrete command mappings
-
-## Testing
-
-Use the provided test script:
-```bash
-./test_abstract_commands.sh
-```
 
 This tests the abstract command system with various scenarios including self-check, emergency stop, and multi-command sequences.
 

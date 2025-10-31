@@ -21,7 +21,7 @@ import (
 )
 
 type MotionControlSystem struct {
-	eventLoop       *core.EventLoop
+	eventLoop      *core.EventLoop
 	infrastructure *management.InfrastructureManager
 	application    *management.ApplicationManager
 	ctx            context.Context
@@ -60,7 +60,7 @@ func NewMotionControlSystem(configPath string) (*MotionControlSystem, error) {
 	}
 
 	system := &MotionControlSystem{
-		eventLoop:       eventLoop,
+		eventLoop:      eventLoop,
 		infrastructure: infrastructure,
 		application:    application,
 	}
@@ -206,54 +206,10 @@ func (mcs *MotionControlSystem) setupConfigWatcher() {
 	})
 }
 
-// IPC处理方法已移至ApplicationManager中实现
-func (mcs *MotionControlSystem) handleTaskRequest(message types.IPCMessage) {
-	// 委托给ApplicationManager处理
-	// 这些方法应该在ApplicationManager中实现
-	log.Printf("Task request handler called - should be implemented in ApplicationManager")
-}
-
-func (mcs *MotionControlSystem) handleStatusRequest(message types.IPCMessage) {
-	// TODO: 实现状态请求处理，通过管理器访问组件
-	log.Printf("Status request handler called - should access through managers")
-}
-
 func (mcs *MotionControlSystem) handleConfigUpdate(config types.SystemConfig) {
 	// TODO: 实现配置更新处理
 	log.Println("Handling configuration update...")
 	log.Println("Configuration updated successfully")
-}
-
-func (mcs *MotionControlSystem) handleIPCConfigUpdate(message types.IPCMessage) {
-	// TODO: 实现IPC配置更新处理
-	log.Println("Handling IPC config update...")
-}
-
-func (mcs *MotionControlSystem) handleTaskTemplateRequest(message types.IPCMessage) {
-	// TODO: 实现任务模板请求处理
-	log.Printf("Task template request handler called - should access through managers")
-}
-
-func (mcs *MotionControlSystem) handleTaskNodeRequest(message types.IPCMessage) {
-	// TODO: 实现任务节点请求处理
-	log.Printf("Task node request handler called - should access through managers")
-}
-
-// createTaskNodeFromTemplate 已移至ApplicationManager中实现
-func (mcs *MotionControlSystem) createTaskNodeFromTemplate(rootConfig types.TaskNodeConfig, childConfigs []types.TaskNodeConfig) types.TaskNode {
-	// TODO: 实现任务节点创建
-	log.Printf("createTaskNodeFromTemplate called - should access through ApplicationManager")
-	return nil
-}
-
-func (mcs *MotionControlSystem) handleAbstractCommandRequest(message types.IPCMessage) {
-	// TODO: 实现抽象命令请求处理
-	log.Printf("Abstract command request handler called - should access through managers")
-}
-
-func (mcs *MotionControlSystem) sendErrorResponse(target, errorType, message string) {
-	// TODO: 实现错误响应发送，通过管理器访问IPC服务器
-	log.Printf("sendErrorResponse called - should access through infrastructure manager")
 }
 
 func (mcs *MotionControlSystem) printSystemInfo() {
@@ -266,15 +222,22 @@ func (mcs *MotionControlSystem) printSystemInfo() {
 	fmt.Printf("  Queue Size: %d\n", config.QueueSize)
 	fmt.Printf("  IPC Server: %s:%d\n", config.IPC.Address, config.IPC.Port)
 	fmt.Printf("  Devices: %d\n", len(config.Devices))
-	fmt.Printf("  Axes: %d\n", len(config.Axes))
+	fmt.Printf("  Device Groups: %d\n", len(config.DeviceGroups))
 	fmt.Println("==========================================")
 
 	for deviceID, deviceConfig := range config.Devices {
 		fmt.Printf("  Device %s: %s (%s)\n", deviceID, deviceConfig.Type, deviceConfig.Protocol)
 	}
 
-	for axisID, axisConfig := range config.Axes {
-		fmt.Printf("  Axis %s: %s [%.1f, %.1f]\n", axisID, axisConfig.DeviceID, axisConfig.MinPosition, axisConfig.MaxPosition)
+	for groupID, groupConfig := range config.DeviceGroups {
+		fmt.Printf("  Device Group %s: %s (%d devices, %d dimensions)\n",
+			groupID, groupConfig.Name, len(groupConfig.DeviceIDs), len(groupConfig.Dimensions))
+
+		for dimName, dimConfig := range groupConfig.Dimensions {
+			fmt.Printf("    Dimension %s: %s [%.1f, %.1f] v=%.1f a=%.1f\n",
+				dimName, dimConfig.Type, dimConfig.MinValue, dimConfig.MaxValue,
+				dimConfig.MaxVelocity, dimConfig.MaxAccel)
+		}
 	}
 
 	fmt.Println("==========================================")
